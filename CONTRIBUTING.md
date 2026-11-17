@@ -5,6 +5,8 @@ project: read this page before opening a pull request.
 
 ## Quick start
 
+Requires **Node.js 22 or newer** (see `.nvmrc`) and npm.
+
 ```bash
 git clone https://github.com/CaullenOmdahl/whatsapp-chat-export.git
 cd whatsapp-chat-export

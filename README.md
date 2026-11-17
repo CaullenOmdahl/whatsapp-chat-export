@@ -102,8 +102,8 @@ extension's card in `chrome://extensions`. Reload any open WhatsApp Web tab afte
 
 > **Requirements:** Chrome 102+ or a Chromium browser with equivalent Manifest V3 support (current
 > Edge, Brave or Arc), a working WhatsApp Web session, and the chat open in the active tab. There is
-> no build step — the extension is plain, dependency-free JavaScript. Node.js is only needed to run
-> the tests and build the release zip.
+> no build step — the extension is plain, dependency-free JavaScript. Node.js 22+ is only needed to
+> run the tests and build the release zip.
 
 ## Usage
 
