@@ -4,10 +4,26 @@ All notable changes to **Chat Export for WhatsApp** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.1] — 2026-11-18
+
+### Fixed
+
+- **History loading now reaches the beginning of the conversation.** The message list is
+  detected even when WhatsApp hides its scrollbar (`overflow: hidden`), which previously
+  made the extension give up and export only the messages already on screen. When jumping
+  to the top stops producing new pages, loading falls back to viewport-sized scroll steps,
+  and each round now waits for the next page instead of giving up after a few seconds.
+- **The message count in the popup is accurate.** It counted DOM nodes rather than unique
+  message ids, so it could show a much higher number than the export contained.
+- Messages that WhatsApp removes from the DOM while scrolling are still included, because
+  history is parsed while loading instead of only at the end.
+- Loading stops when the selected date range is covered, not before and not long after.
 
 ### Changed
 
+- The history budget is now 10 minutes (was 4) with a clear warning if it is reached, so
+  long conversations load as far back as WhatsApp allows.
+- The date range option explains how far back it will scroll.
 - CI runs the suite on Node 22 and 24; Node 22 is now the minimum for development
   (jsdom 31 requires it).
 - Dependency and GitHub Actions updates from Dependabot, with Actions still pinned to

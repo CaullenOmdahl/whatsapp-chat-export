@@ -85,6 +85,18 @@ if (!WAEx) {
   }
 }
 
+if (WAEx && WAEx.VERSION !== manifest.version) {
+  problem(`src/lib/namespace.js WAEx.VERSION (${WAEx.VERSION}) != manifest.json version (${manifest.version})`);
+}
+try {
+  const pkg = JSON.parse(read('package.json'));
+  if (pkg.version !== manifest.version) {
+    problem(`package.json version (${pkg.version}) != manifest.json version (${manifest.version})`);
+  }
+} catch (err) {
+  problem('package.json: ' + err.message);
+}
+
 const allowedPermissions = ['storage', 'scripting', 'activeTab'];
 for (const permission of manifest.permissions) {
   if (!allowedPermissions.includes(permission)) {

@@ -11,7 +11,7 @@
   var WAEx = (global.WAEx = global.WAEx || {});
 
   /** Extension version, mirrored in manifest.json. */
-  WAEx.VERSION = '1.0.0';
+  WAEx.VERSION = '1.0.1';
 
   /** Bump when the persisted settings shape changes. */
   WAEx.SETTINGS_VERSION = 1;

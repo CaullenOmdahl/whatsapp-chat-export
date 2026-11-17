@@ -23,16 +23,24 @@
 
   var LIMITS = {
     /** Hard cap on scroll round-trips. */
-    maxScrollSteps: 600,
-    /** Overall time budget for loading history, in ms. */
-    timeBudgetMs: 240000,
-    /** A scroll round-trip is considered settled after this long without changes. */
-    settleQuietMs: 140,
-    settleTimeoutMs: 1200,
-    /** Stop after this many consecutive empty rounds at the top. */
-    topStabilityRounds: 3,
+    maxScrollSteps: 4000,
+    /** Overall time budget for loading history, in ms (10 minutes). */
+    timeBudgetMs: 10 * 60 * 1000,
+    /** Longest we wait for one page of older messages to arrive. */
+    growthTimeoutMs: 4000,
+    /** While nothing is loading, how long before a round is called idle. */
+    growthGraceMs: 1100,
+    /** A DOM mutation this recent counts as "still loading". */
+    activityQuietMs: 450,
+    pollMs: 120,
+    /** Idle rounds in jump mode before switching to incremental scrolling. */
+    maxIdleRounds: 4,
+    /** Incremental rounds before we conclude the chat is fully loaded. */
+    nudgeSteps: 3,
+    settleAfterLoadMs: 80,
+    /** Absolute ceiling, so a runaway loop cannot exhaust memory. */
+    maxMessages: 150000,
   };
-
   /* ------------------------------------------------------------ selectors */
 
   var SELECTORS = {
@@ -123,13 +131,30 @@
       .trim();
   }
 
+  /**
+   * True when the element has more content than it can display.
+   *
+   * Deliberately does NOT require `overflow: auto`. WhatsApp hides the scrollbar
+   * (overflow: hidden) while still letting the list be scrolled programmatically, so
+   * filtering on computed overflow is the easiest way to miss the real container and
+   * export only the messages that happen to be on screen.
+   */
   function isScrollable(el) {
     if (!el || !el.ownerDocument) return false;
+    return el.scrollHeight > el.clientHeight + 24;
+  }
+
+  /** Verify the element really moves when asked to scroll (not an overflow shell). */
+  function canScroll(el) {
+    if (!el) return false;
     try {
-      var style = global.getComputedStyle(el);
-      if (!style) return false;
-      var overflow = (style.overflowY || '') + ' ' + (style.overflow || '');
-      return /(auto|scroll|overlay)/.test(overflow) && el.scrollHeight > el.clientHeight + 24;
+      var before = el.scrollTop;
+      var probe = Math.min(60, el.scrollHeight - el.clientHeight);
+      if (probe <= 0) return false;
+      el.scrollTop = before + probe;
+      var moved = el.scrollTop !== before;
+      el.scrollTop = before;
+      return moved;
     } catch (err) {
       return false;
     }
@@ -139,6 +164,32 @@
     return new Promise(function (resolve) {
       setTimeout(resolve, ms);
     });
+  }
+
+  function hasOwn(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+  }
+
+  function countKeys(object) {
+    var total = 0;
+    for (var key in object) {
+      if (hasOwn(object, key)) total++;
+    }
+    return total;
+  }
+
+  /** Small summary of the scroller, shown by the diagnostics panel. */
+  function scrollInfo(scroller) {
+    if (!scroller) {
+      return { found: false, scrollTop: 0, scrollHeight: 0, clientHeight: 0, scrollable: false };
+    }
+    return {
+      found: true,
+      scrollTop: scroller.scrollTop || 0,
+      scrollHeight: scroller.scrollHeight || 0,
+      clientHeight: scroller.clientHeight || 0,
+      scrollable: (scroller.scrollHeight || 0) > (scroller.clientHeight || 0) + 24,
+    };
   }
 
   /* ----------------------------------------------------------- discovery */
@@ -155,36 +206,92 @@
   }
 
   /**
-   * The message list scroll container: nearest scrollable ancestor of a message
-   * row. Falls back to the deepest scrollable element inside the conversation.
+   * Every message node in DOM order, one per unique `data-id`.
+   * Nested `data-id` wrappers (if WhatsApp adds them) are collapsed to one message.
+   */
+  function messageNodes(root) {
+    var scope = root || findMain();
+    if (!scope || !scope.querySelectorAll) return [];
+    var nodes = scope.querySelectorAll('div[data-id]');
+    var seen = Object.create(null);
+    var out = [];
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var id = node.getAttribute('data-id');
+      if (!isMessageId(id) || seen[id]) continue;
+      var parent = node.parentElement;
+      if (parent && parent.closest && parent.closest('[data-id]')) continue;
+      seen[id] = true;
+      out.push(node);
+    }
+    return out;
+  }
+
+  /**
+   * The message list scroll container.
+   *
+   * Walk up from a message node and take every ancestor whose content overflows and
+   * which actually scrolls. The outermost such element (largest content height) is the
+   * message list. If that finds nothing, scan inside the conversation panel for any
+   * scrolling element that contains messages.
    */
   function findScrollContainer(main) {
     var root = main || findMain();
     if (!root) return null;
 
+    // Revalidate the cached element every time: React remounts the list on some
+    // navigation and a stale node silently swallows every scrollTop assignment.
     if (cache.scroller && cache.scroller.isConnected && root.contains(cache.scroller)) {
       return cache.scroller;
     }
 
+    /**
+     * Accept an element as the scroller.
+     *
+     * Only ambiguous elements (overflow hidden, no visible scrollbar) get probed with a
+     * real scrollTop change. Probing a normal scroller would nudge the conversation and
+     * make WhatsApp load a page of history before the export has even started.
+     */
+    function consider(list, el) {
+      if (!el || el === root || !isScrollable(el)) return;
+      var declared = false;
+      try {
+        var style = global.getComputedStyle(el);
+        declared = /(auto|scroll|overlay)/.test(
+          String((style && style.overflowY) || '') + ' ' + String((style && style.overflow) || '')
+        );
+      } catch (err) {
+        declared = false;
+      }
+      if (!declared && !canScroll(el)) return;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] === el) return;
+      }
+      list.push(el);
+    }
+
+    var candidates = [];
     var anchor =
       root.querySelector('div[data-id]') ||
       root.querySelector('div[role="row"]') ||
       root.querySelector('.copyable-text') ||
       null;
 
-    var candidates = [];
     var node = anchor ? anchor.parentElement : null;
     var guard = 0;
-    while (node && node !== root && guard < 60) {
-      if (isScrollable(node)) candidates.push(node);
+    while (node && node !== root && guard < 80) {
+      consider(candidates, node);
       node = node.parentElement;
       guard++;
     }
 
     if (!candidates.length) {
       var all = root.querySelectorAll('div');
-      for (var i = 0; i < all.length; i++) {
-        if (isScrollable(all[i])) candidates.push(all[i]);
+      for (var i = 0; i < all.length && candidates.length < 4; i++) {
+        var el = all[i];
+        if (el.scrollHeight <= el.clientHeight + 24) continue;
+        if (!el.querySelector('div[data-id], div[role="row"]')) continue;
+        consider(candidates, el);
       }
     }
 
@@ -193,8 +300,12 @@
       return null;
     }
 
+    // Outermost scrolling element wins; ties break towards the higher one in the tree.
     candidates.sort(function (a, b) {
-      return b.scrollHeight - a.scrollHeight;
+      var delta = b.scrollHeight - a.scrollHeight;
+      if (delta !== 0) return delta;
+      if (a === b) return 0;
+      return a.contains(b) ? 1 : -1;
     });
 
     cache.scroller = candidates[0];
@@ -310,7 +421,7 @@
       name: name,
       isGroup: inferIsGroup(main),
       initials: initialsFor(name),
-      renderedCount: main.querySelectorAll('div[data-id]').length,
+      renderedCount: messageNodes(main).length,
       dateRange: range,
     };
     return info;
@@ -366,46 +477,112 @@
 
   /* --------------------------------------------------------- history load */
 
-  /** Wait until the message list stops changing (or the timeout elapses). */
-  function settle(scroller) {
+  /** Tell the page it was scrolled; some builds only react to the event, not scrollTop. */
+  function nudgeScroll(scroller) {
+    if (!scroller) return;
+    try {
+      scroller.dispatchEvent(new Event('scroll', { bubbles: false }));
+    } catch (err) {
+      /* the assignment is usually enough */
+    }
+    try {
+      if (typeof global.WheelEvent !== 'function') return;
+      var box = scroller.getBoundingClientRect ? scroller.getBoundingClientRect() : null;
+      scroller.dispatchEvent(
+        new global.WheelEvent('wheel', {
+          deltaY: -Math.round((scroller.clientHeight || 600) * 0.8),
+          deltaMode: 0,
+          bubbles: true,
+          cancelable: true,
+          clientX: box ? box.left + box.width / 2 : 0,
+          clientY: box ? box.top + box.height / 2 : 0,
+        })
+      );
+    } catch (err) {
+      /* non-fatal */
+    }
+  }
+
+  /**
+   * Wait for the next page of older messages.
+   *
+   * Resolves as soon as the number of message nodes or the scroll height grows.
+   * While the list is still mutating (WhatsApp fetching history) we keep waiting;
+   * once it has been quiet for a moment we conclude there is nothing older to load.
+   */
+  function waitForDomChange(scroller, baseline) {
+    var main = findMain() || document.body;
     return new Promise(function (resolve) {
-      var target = scroller || findMain() || document.body;
-      var start = Date.now();
-      var lastHeight = target.scrollHeight;
-      var quietSince = Date.now();
+      var started = Date.now();
+      var lastActivity = started;
       var observer = null;
+
+      function measure() {
+        return {
+          nodes: main.querySelectorAll ? main.querySelectorAll('div[data-id]').length : 0,
+          height: scroller && scroller.isConnected ? scroller.scrollHeight || 0 : 0,
+        };
+      }
+
+      function finish(grew) {
+        clearInterval(timer);
+        if (observer) observer.disconnect();
+        resolve({ grew: grew, measure: measure() });
+      }
 
       try {
         observer = new MutationObserver(function () {
-          quietSince = Date.now();
+          lastActivity = Date.now();
         });
-        observer.observe(target, { childList: true, subtree: true, characterData: true });
+        observer.observe(main, { childList: true, subtree: true, characterData: true });
       } catch (err) {
         observer = null;
       }
 
       var timer = setInterval(function () {
-        var height = target.scrollHeight;
-        if (height !== lastHeight) {
-          lastHeight = height;
-          quietSince = Date.now();
+        var now = measure();
+        var elapsed = Date.now() - started;
+        if (now.nodes > baseline.nodes || now.height > baseline.height + 20) {
+          finish(true);
+          return;
         }
-        var quiet = Date.now() - quietSince >= LIMITS.settleQuietMs;
-        var elapsed = Date.now() - start;
-        if ((quiet && elapsed >= LIMITS.settleQuietMs) || elapsed >= LIMITS.settleTimeoutMs) {
-          clearInterval(timer);
-          if (observer) observer.disconnect();
-          resolve();
+        if (elapsed >= LIMITS.growthTimeoutMs) {
+          finish(false);
+          return;
         }
-      }, 60);
+        var busy = Date.now() - lastActivity < LIMITS.activityQuietMs;
+        if (!busy && elapsed >= LIMITS.growthGraceMs) finish(false);
+      }, LIMITS.pollMs);
     });
   }
 
+  /** Oldest timestamp among the messages parsed so far. */
+  function collectedOldest(collected) {
+    var oldest = null;
+    for (var id in collected) {
+      if (!hasOwn(collected, id)) continue;
+      var timestamp = collected[id].timestamp;
+      if (timestamp === null || timestamp === undefined) continue;
+      if (oldest === null || timestamp < oldest) oldest = timestamp;
+    }
+    return oldest;
+  }
+
   /**
-   * Scroll the conversation to the top repeatedly until no older messages load.
+   * Load as much of the conversation history as WhatsApp will give us.
    *
-   * `onProgress({ loaded, oldest, atTop, rounds })` is called after each round so the
-   * caller can update the UI and decide whether the requested date range is covered.
+   * Loop: scroll towards the top, wait for the next page to render, parse only the
+   * messages we have not seen yet. Parsing as we go means messages are kept even if
+   * WhatsApp later removes their nodes, and it makes the progress counter honest.
+   *
+   * Scrolling happens in two modes: jump to the very top (fast; WhatsApp fetches a
+   * page of history), and — when a jump stops producing new messages — incremental
+   * viewport-sized steps, which is what a human scroll looks like and nudges builds
+   * that only load on real scroll gestures. It stops when:
+   *   - the requested date range is covered (`dateBounds.start`),
+   *   - the list is already at the oldest message,
+   *   - the time/step/message budgets run out, or
+   *   - the user cancels.
    */
   async function loadAllHistory(options) {
     var opts = options || {};
@@ -425,46 +602,58 @@
 
     var scroller = findScrollContainer(main);
     var warnings = [];
-
-    if (!scroller) {
-      warnings.push(
-        'Could not find the message list scroll container. Only the messages already on screen were captured.'
-      );
-    }
-
     var originalTop = scroller ? scroller.scrollTop : 0;
-    var seen = Object.create(null);
-    var seenCount = 0;
-    var startedAt = Date.now();
-    var rounds = 0;
-    var emptyRounds = 0;
-    var atTop = false;
-    var cancelled = false;
+
+    var collected = Object.create(null); // message id -> parsed Message
+    var seen = Object.create(null); // message id -> node, kept for recovery/diagnostics
+    var parseIndex = 0;
+    var ctx = {
+      order: resolveDateOrder(collectDateSamples(getRows(main))),
+      includeReactions: opts.includeReactions !== false,
+      lastTimestamp: null,
+    };
 
     function harvest() {
-      var nodes = main.querySelectorAll('div[data-id]');
+      var nodes = messageNodes(main);
       var added = 0;
       for (var i = 0; i < nodes.length; i++) {
-        var id = nodes[i].getAttribute('data-id');
-        if (!isMessageId(id) || seen[id]) continue;
-        var parent = nodes[i].parentElement;
-        if (parent && parent.closest && parent.closest('[data-id]')) continue;
-        seen[id] = nodes[i];
+        var node = nodes[i];
+        var id = node.getAttribute('data-id');
+        if (!id || !isMessageId(id) || collected[id]) continue;
+        seen[id] = node;
+        ctx.index = parseIndex++;
+        var message = parseRow(node, ctx);
+        if (!message) continue;
+        if (message.timestamp) ctx.lastTimestamp = message.timestamp;
+        collected[id] = message;
         added++;
       }
-      seenCount += added;
       return added;
     }
 
-    harvest();
+    var parsedCount = harvest();
+    onProgress({
+      loaded: parsedCount,
+      oldest: collectedOldest(collected),
+      atTop: !scroller,
+      rounds: 0,
+    });
 
-    // Prime the day/month order from the messages on screen, so the date-range stop
-    // check compares real timestamps from the very first scroll round.
-    resolveDateOrder(collectDateSamples(getRows(main)));
+    if (!scroller) {
+      warnings.push(
+        'Could not find a scrollable message list, so only the messages already on screen were captured. ' +
+          'Please open Diagnostics in the popup and include the report when reporting this.'
+      );
+    }
 
-    onProgress({ loaded: seenCount, oldest: null, atTop: false, rounds: 0 });
+    var startedAt = Date.now();
+    var rounds = 0;
+    var idleAtTop = 0;
+    var idleRounds = 0;
+    var mode = 'jump';
+    var cancelled = false;
 
-    while (!cancelled) {
+    while (scroller && !cancelled) {
       if (shouldCancel()) {
         cancelled = true;
         break;
@@ -481,51 +670,103 @@
         warnings.push(
           'Stopped after ' +
             Math.round((Date.now() - startedAt) / 1000) +
-            's to keep the export responsive. Older messages may be missing.'
+            's so the export would finish. Older messages may be missing.'
+        );
+        break;
+      }
+      if (parsedCount >= LIMITS.maxMessages) {
+        warnings.push(
+          'Stopped at ' +
+            WAEx.plural(LIMITS.maxMessages, 'message') +
+            '. The rest of the conversation was not loaded.'
         );
         break;
       }
 
-      if (scroller) {
-        scroller.scrollTop = 0;
-        // Some builds only react to a real scroll event.
-        try {
-          scroller.dispatchEvent(new Event('scroll', { bubbles: false }));
-        } catch (err) {
-          /* the assignment above is usually enough */
-        }
-      }
+      var atTopBefore = scroller.scrollTop <= 2;
+      var baseline = {
+        nodes: main.querySelectorAll('div[data-id]').length,
+        height: scroller.scrollHeight || 0,
+      };
 
-      await settle(scroller);
+      if (mode === 'jump') {
+        scroller.scrollTop = 0;
+      } else {
+        var step = Math.max(160, Math.round((scroller.clientHeight || 600) * 0.8));
+        scroller.scrollTop = Math.max(0, scroller.scrollTop - step);
+      }
+      nudgeScroll(scroller);
+
+      var change = await waitForDomChange(scroller, baseline);
       var added = harvest();
+      parsedCount += added;
       rounds++;
 
-      var oldest = oldestTimestamp(main);
-      atTop = !scroller || scroller.scrollTop <= 2;
+      var oldest = collectedOldest(collected);
+      var atTop = scroller.scrollTop <= 2;
 
-      onProgress({ loaded: seenCount, oldest: oldest, atTop: atTop, rounds: rounds });
+      onProgress({
+        loaded: parsedCount,
+        oldest: oldest,
+        atTop: atTop,
+        rounds: rounds,
+        grew: change.grew,
+      });
 
-      if (opts.dateBounds && opts.dateBounds.start) {
-        if (oldest !== null && oldest < opts.dateBounds.start) break;
+      if (opts.dateBounds && opts.dateBounds.start && oldest !== null) {
+        if (oldest < opts.dateBounds.start) break;
       }
 
-      if (atTop && added === 0) {
-        emptyRounds++;
-        if (emptyRounds >= LIMITS.topStabilityRounds) break;
+      if (change.grew || added > 0) {
+        idleRounds = 0;
+        idleAtTop = 0;
+        mode = 'jump';
+      } else if (atTopBefore && atTop) {
+        // Already showing the oldest message and nothing new arrived.
+        idleAtTop++;
+        if (idleAtTop >= 2) break;
       } else {
-        emptyRounds = 0;
+        idleRounds++;
+        if (mode === 'jump' && idleRounds >= LIMITS.maxIdleRounds) {
+          mode = 'nudge';
+          idleRounds = 0;
+        } else if (mode === 'nudge' && idleRounds >= LIMITS.nudgeSteps) {
+          break;
+        }
       }
     }
 
-    // Give the DOM a moment to finish painting the newly prepended nodes.
-    await sleep(60);
+    await sleep(LIMITS.settleAfterLoadMs);
+
+    // Final pass over the DOM: picks up system notices and anything rendered since the
+    // last harvest, and merges in messages that were virtualised away while scrolling.
+    var domResult = parseMessages({
+      main: main,
+      harvested: seen,
+      includeReactions: opts.includeReactions,
+    });
+    var merged = domResult.messages.slice();
+    var known = Object.create(null);
+    for (var i = 0; i < merged.length; i++) known[merged[i].id] = true;
+    for (var id in collected) {
+      if (!hasOwn(collected, id) || known[id]) continue;
+      merged.push(collected[id]);
+    }
+    merged = backfillAndSort(merged);
+
+    warnings = warnings.concat(domResult.warnings || []);
+    if (cancelled) warnings.push('Export cancelled while history was still loading.');
 
     return {
       main: main,
       scroller: scroller,
       originalTop: originalTop,
       seen: seen,
-      loaded: seenCount,
+      collected: collected,
+      messages: merged,
+      loaded: countKeys(collected),
+      rounds: rounds,
+      scroll: scrollInfo(scroller),
       warnings: warnings,
       cancelled: cancelled,
     };
@@ -894,6 +1135,43 @@
   }
 
   /**
+   * System notices carry no timestamp attribute; borrow the nearest message's time so
+   * exports never show a blank clock. Then sort by timestamp, keeping unknown-time
+   * messages in their original relative order.
+   */
+  function backfillAndSort(messages) {
+    var lastKnown = null;
+    var i;
+
+    for (i = 0; i < messages.length; i++) {
+      if (messages[i].timestamp !== null && messages[i].timestamp !== undefined) {
+        lastKnown = messages[i].timestamp;
+      } else if (lastKnown !== null) {
+        messages[i].timestamp = lastKnown;
+        messages[i].dateKey = dt.dateKey(lastKnown);
+      }
+    }
+
+    lastKnown = null;
+    for (i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].timestamp !== null && messages[i].timestamp !== undefined) {
+        lastKnown = messages[i].timestamp;
+      } else if (lastKnown !== null) {
+        messages[i].timestamp = lastKnown;
+        messages[i].dateKey = dt.dateKey(lastKnown);
+      }
+    }
+
+    messages.sort(function (a, b) {
+      if (a.timestamp === null || a.timestamp === undefined) return 0;
+      if (b.timestamp === null || b.timestamp === undefined) return 0;
+      return a.timestamp - b.timestamp;
+    });
+
+    return messages;
+  }
+
+  /**
    * Parse every message currently reachable in the conversation, in DOM order.
    * `harvested` is the id -> node map collected while scrolling (fills gaps when
    * WhatsApp removes off-screen nodes).
@@ -973,32 +1251,7 @@
       }
     }
 
-    // System notices carry no timestamp attribute; borrow the nearest message's
-    // time so exports never show a blank clock.
-    var lastKnown = null;
-    for (var f = 0; f < messages.length; f++) {
-      if (messages[f].timestamp !== null) {
-        lastKnown = messages[f].timestamp;
-      } else if (lastKnown !== null) {
-        messages[f].timestamp = lastKnown;
-        messages[f].dateKey = dt.dateKey(lastKnown);
-      }
-    }
-    lastKnown = null;
-    for (var b2 = messages.length - 1; b2 >= 0; b2--) {
-      if (messages[b2].timestamp !== null) {
-        lastKnown = messages[b2].timestamp;
-      } else if (lastKnown !== null) {
-        messages[b2].timestamp = lastKnown;
-        messages[b2].dateKey = dt.dateKey(lastKnown);
-      }
-    }
-
-    // Sanity: sort by timestamp when we have them, but keep unknown-time order.
-    messages.sort(function (a, b) {
-      if (a.timestamp === null || b.timestamp === null) return 0;
-      return a.timestamp - b.timestamp;
-    });
+    messages = backfillAndSort(messages);
 
     var noTimestamp = messages.filter(function (m) {
       return m.timestamp === null;
@@ -1066,6 +1319,8 @@
 
     var info = getChatInfo();
     var scroller = findScrollContainer(main);
+    var scroll = scrollInfo(scroller);
+    var renderedMessages = main ? messageNodes(main).length : 0;
     var parsed = 0;
     try {
       parsed = main ? parseMessages({ main: main, includeReactions: false }).messages.length : 0;
@@ -1080,13 +1335,20 @@
         'Rows exist but none parsed into messages. The DOM structure likely changed; see docs/TROUBLESHOOTING.md.'
       );
     }
+    if (main && scroll.found && !scroll.scrollable) {
+      warnings.push(
+        'The message list is not scrollable right now, so history cannot be loaded until it is (is the chat still opening?).'
+      );
+    }
 
     return {
       url: String(global.location && global.location.href),
       mainPanel: Boolean(main),
       messageList: rows.length > 0,
       scrollContainer: Boolean(scroller),
+      scroll: scroll,
       renderedRows: rows.length,
+      renderedMessages: renderedMessages,
       parsedMessages: parsed,
       chat: info,
       selectors: selectors,
@@ -1131,9 +1393,13 @@
     restoreScroll: restoreScroll,
     readText: readText,
     initialsFor: initialsFor,
+    messageNodes: messageNodes,
+    scrollInfo: scrollInfo,
+    backfillAndSort: backfillAndSort,
     resolveDateOrder: resolveDateOrder,
     resetDateOrderCache: function () {
       orderCache = null;
+      cache.scroller = null;
     },
     _internal: {
       detectMedia: detectMedia,

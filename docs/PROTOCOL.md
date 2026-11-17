@@ -103,7 +103,7 @@ type ChatInfo = {
   name: string;                   // contact or group name, '' when unknown
   isGroup: boolean;
   initials: string;               // 1-2 chars for the avatar
-  renderedCount: number;          // message nodes currently in the DOM
+  renderedCount: number;          // unique message ids currently in the DOM
   dateRange: { start: number, end: number } | null;  // epoch ms
   found: boolean;                 // false when no chat is open
   reason?: string;                // why it was not found
@@ -154,7 +154,15 @@ type DiagnosticsReport = {
   messageList: boolean;
   scrollContainer: boolean;
   renderedRows: number;
+  renderedMessages: number;       // unique message ids in the DOM
   parsedMessages: number;
+  scroll: {
+    found: boolean;               // scroll container detected
+    scrollable: boolean;          // content overflows it right now
+    scrollTop: number;
+    scrollHeight: number;
+    clientHeight: number;
+  };
   chat: ChatInfo;                 // same shape as the PING reply
   selectors: {
     name: string;

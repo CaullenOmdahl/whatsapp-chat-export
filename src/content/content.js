@@ -231,7 +231,7 @@
         lastChatName = chatInfo.name;
       }
 
-      setPhase(PHASE.SCROLLING, 'Loading messages', { loaded: 0, percent: bounds.start ? 2 : null });
+      setPhase(PHASE.SCROLLING, 'Loading older messages', { loaded: 0, percent: bounds.start ? 2 : null });
 
       // ---- phase 1: load history -------------------------------------------------
       history = await extractor.loadAllHistory({
@@ -253,7 +253,7 @@
           reportProgress({
             loaded: progress.loaded,
             percent: percent,
-            detail: 'Loading messages',
+            detail: progress.atTop ? 'Reached the oldest message' : 'Scrolling back through history',
           });
         },
       });
@@ -267,15 +267,18 @@
         percent: bounds.start ? 97 : null,
       });
 
-      var parsed = extractor.parseMessages({
-        main: history.main,
-        harvested: history.seen,
-        includeReactions: settings.includeReactions,
-      });
-
-      warnings = warnings.concat(parsed.warnings || []);
-
-      var messages = parsed.messages;
+      // loadAllHistory parsed every message it saw while scrolling, so messages that
+      // WhatsApp removed from the DOM afterwards are still in the export.
+      var messages = Array.isArray(history.messages) ? history.messages.slice() : null;
+      if (!messages) {
+        var parsed = extractor.parseMessages({
+          main: history.main,
+          harvested: history.seen,
+          includeReactions: settings.includeReactions,
+        });
+        warnings = warnings.concat(parsed.warnings || []);
+        messages = parsed.messages;
+      }
 
       // System messages are collected always; the option only decides whether they ship.
       if (!settings.includeSystem) {

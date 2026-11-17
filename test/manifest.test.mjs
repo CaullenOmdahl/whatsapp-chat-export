@@ -56,6 +56,13 @@ check('content script list matches WAEx.CONTENT_FILES exactly', () => {
   eq(manifest.content_scripts[0].js, globalThis.WAEx.CONTENT_FILES);
 });
 
+check('versions agree across manifest, namespace and package.json', () => {
+  loadLibsInNode(['src/lib/namespace.js']);
+  eq(globalThis.WAEx.VERSION, manifest.version, 'WAEx.VERSION');
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  eq(pkg.version, manifest.version, 'package.json version');
+});
+
 check('every listed content script file exists', () => {
   const missing = manifest.content_scripts[0].js.filter((relative) => !exists(relative));
   eq(missing, []);

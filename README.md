@@ -52,7 +52,7 @@ via the issue templates.
 Plus:
 
 - **One-click export** of the conversation that is currently open. The extension scrolls up through the chat by itself to load history as it goes.
-- **Loads older history** instead of only the handful of messages WhatsApp keeps on screen.
+- **Loads the whole history.** It scrolls back through the conversation until WhatsApp has nothing older to give — or until the date range you picked is covered — and says so if it ever hits a limit.
 - **Date ranges:** all time, last 7 / 30 / 90 days, or a custom start–end range. Older messages are skipped and early scrolling stops once the cutoff is reached.
 - **Media handling:** skip media, leave a placeholder letting you see where each item was, or download the capturable media. Media exports arrive as a single `.zip` containing the report and the files it references.
 - **Include system messages** (joins, leaves, "Messages and calls are end-to-end encrypted", etc.) if you want them.
@@ -215,7 +215,7 @@ timestamp_iso,timestamp_ms,date,time,author,direction,type,text,quoted_author,qu
 
 - **A content script runs inside the WhatsApp Web tab.** It only activates on `https://web.whatsapp.com/*`, reads the page that is already rendered in your browser, and has no network access of its own.
 - **It finds the conversation panel and the message list** through a small set of selectors, each with a fallback chain. If a lookup fails, the export records a warning instead of crashing.
-- **It loads history by scrolling up incrementally**, waiting for WhatsApp to render older messages, and repeating until it reaches the top of the chat or passes your date cutoff.
+- **It loads history by scrolling back through the conversation.** It jumps to the top of the list so WhatsApp fetches the previous page, waits for the next page to render, and parses only the messages it has not seen yet. When a jump stops producing new messages it switches to viewport-sized scroll steps (what a human scroll looks like) before concluding the chat is fully loaded. It stops at the oldest message, once your date range is covered, or at a documented safety limit.
 - **Each rendered message is identified by its `data-id` attribute**, which is stable enough to avoid double-counting when rows are recycled while scrolling. Timestamps are read from WhatsApp's `data-pre-plain-text` attribute (or the row's time element as a fallback).
 - **Messages are parsed into a common shape** (author, outgoing flag, type, text, quote, reactions, media) so HTML, TXT, JSON and CSV all come from one pass.
 - **Media is captured from what WhatsApp has already rendered.** Images and other previews are fetched from the blob/data URLs in the page and bundled with the report into a generated `.zip`; media WhatsApp has never loaded cannot be fetched, so it is marked missing instead of silently dropped.
@@ -231,7 +231,7 @@ A longer walkthrough of the modules and message flow is in [docs/ARCHITECTURE.md
 | Option | Values | Default | What it does |
 | --- | --- | --- | --- |
 | **Format** | HTML, TXT, JSON, CSV | `HTML` | Output file type. HTML is a styled standalone page; JSON and CSV are for scripts and spreadsheets. |
-| **Date range** | All time, Last 7 days, Last 30 days, Last 90 days, Custom range | `All time` | Limits the export to messages within the range. Older messages are skipped while scrolling. |
+| **Date range** | All time, Last 7 days, Last 30 days, Last 90 days, Custom range | `All time` | Limits the export to messages within the range. `All time` scrolls back as far as WhatsApp has messages; any other value stops scrolling once the range is covered. |
 | **Custom range** | start date and end date (`YYYY-MM-DD`) | empty | Used only when **Date range** is *Custom range*. Both ends are inclusive; leave one blank for open-ended. |
 | **Media handling** | None, Placeholders, Download (`.zip`) | `Placeholders` | *None* leaves media out entirely; *Placeholders* records where each item was; *Download* collects capturable files and the report into a single `.zip`. |
 | **Include system messages** | on / off | `off` | Includes joins, leaves, group changes and WhatsApp's notices about encryption and calls. |

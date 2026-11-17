@@ -1,11 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Chat Export for WhatsApp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Export a WhatsApp Web conversation to clean HTML, TXT, JSON or CSV, with optional media. Everything stays on your device.",
   "minimum_chrome_version": "102",
-  "permissions": ["storage", "scripting", "activeTab"],
-  "host_permissions": ["https://web.whatsapp.com/*"],
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://web.whatsapp.com/*"
+  ],
   "background": {
     "service_worker": "src/background/service-worker.js"
   },
@@ -27,7 +33,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://web.whatsapp.com/*"],
+      "matches": [
+        "https://web.whatsapp.com/*"
+      ],
       "js": [
         "src/lib/namespace.js",
         "src/lib/datetime.js",

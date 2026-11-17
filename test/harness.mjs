@@ -307,3 +307,24 @@ export function loadLibsInNode(files = LIB_FILES) {
   if (!globalThis.WAEx) throw new Error('WAEx namespace was not created');
   return globalThis.WAEx;
 }
+
+/**
+ * Make the history-loading loop fast for tests.
+ *
+ * The real limits wait seconds for WhatsApp to fetch a page of older messages;
+ * jsdom never grows the list, so those waits would only slow the suite down.
+ */
+export function fastHistoryLimits(window) {
+  const extractor = window.WAEx && window.WAEx.extractor;
+  if (!extractor) return;
+  const limits = extractor.LIMITS;
+  limits.growthTimeoutMs = 60;
+  limits.growthGraceMs = 30;
+  limits.activityQuietMs = 20;
+  limits.pollMs = 10;
+  limits.settleAfterLoadMs = 0;
+  limits.maxIdleRounds = 2;
+  limits.nudgeSteps = 1;
+  limits.maxScrollSteps = 200;
+  limits.timeBudgetMs = 30000;
+}

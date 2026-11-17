@@ -2,6 +2,7 @@ import {
   createEnv,
   loadScripts,
   CONTENT_FILES,
+  fastHistoryLimits,
   suite,
   check,
   checkAsync,
@@ -16,6 +17,7 @@ const AT = (y, mo, d, h, mi, s) => new Date(y, mo - 1, d, h, mi, s || 0, 0).getT
 function boot(html, options = {}) {
   const env = createEnv(html, options);
   loadScripts(env.window, CONTENT_FILES);
+  fastHistoryLimits(env.window);
   const document = env.window.document;
   const scroller = document.getElementById('msg-scroller');
   if (scroller) {
@@ -274,6 +276,82 @@ await checkAsync('recovers harvested nodes that left the DOM', async () => {
   const recovered = env.WAEx.extractor.parseMessages({ harvested: result.seen });
   eq(recovered.messages.length, 11);
   ok(recovered.warnings.some((w) => /recovered from nodes/.test(w)));
+});
+
+/* ---------------------------------------- regression: the 26-of-96 bug */
+
+suite('extractor: history regression');
+
+check('finds a message list that hides its scrollbar', () => {
+  const env = boot(buildFixtureHtml({ overflow: 'hidden' }));
+  const scroller = env.WAEx.extractor.findScrollContainer();
+  eq(scroller && scroller.id, 'msg-scroller', 'overflow:hidden lists must still be found');
+  eq(env.WAEx.extractor.scrollInfo(scroller).scrollable, true);
+});
+
+check('counts unique messages instead of raw data-id nodes', () => {
+  const env = boot(buildFixtureHtml());
+  const node = env.document.querySelector('div[data-id$="AAA1"]');
+  const duplicate = node.cloneNode(true);
+  node.parentElement.appendChild(duplicate); // same data-id rendered twice
+
+  eq(env.WAEx.extractor.getChatInfo().renderedCount, 10);
+  eq(env.WAEx.extractor.messageNodes().length, 10);
+  eq(env.WAEx.extractor.parseMessages().messages.length, 11, 'no duplicated messages');
+});
+
+await checkAsync('loads older pages even when the list hides its scrollbar', async () => {
+  const env = boot(buildFixtureHtml({ overflow: 'hidden' }));
+  const app = env.document.querySelector('div[role="application"]');
+  const scroller = env.scroller;
+  let loads = 0;
+  scroller.__onScrollTop = (value) => {
+    if (value === 0 && loads < 2) {
+      loads++;
+      const holder = env.document.createElement('div');
+      holder.innerHTML = olderRows('H' + loads).join('');
+      const nodes = Array.from(holder.children);
+      for (const node of nodes.reverse()) app.insertBefore(node, app.firstChild);
+      scroller.__scrollHeight += 400;
+    }
+  };
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  ok(result.loaded > 10, 'should have loaded messages older than the initial view, got ' + result.loaded);
+  eq(result.scroll.found, true);
+  eq(result.scroll.scrollable, true);
+  ok(result.messages.length >= result.loaded, 'every loaded message must be exported');
+});
+
+await checkAsync('keeps messages that WhatsApp removes from the DOM mid-scroll', async () => {
+  const env = boot(buildFixtureHtml());
+  const app = env.document.querySelector('div[role="application"]');
+  const scroller = env.scroller;
+  let loads = 0;
+  scroller.__onScrollTop = (value) => {
+    if (value === 0 && loads < 1) {
+      loads++;
+      const holder = env.document.createElement('div');
+      holder.innerHTML = olderRows('R1').join('');
+      const nodes = Array.from(holder.children);
+      for (const node of nodes.reverse()) app.insertBefore(node, app.firstChild);
+      scroller.__scrollHeight += 200;
+      // WhatsApp unmounts an off-screen message while we scroll.
+      const victim = env.document.querySelector('div[data-id$="AAA1"]');
+      if (victim) victim.remove();
+    }
+  };
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.loaded, 12);
+  ok(
+    result.messages.some((message) => /AAA1$/.test(message.id)),
+    'a message removed from the DOM must still appear in the export'
+  );
+  ok(
+    result.messages.some((message) => /OLD1R1$/.test(message.id)),
+    'older messages must be included'
+  );
 });
 
 /* ------------------------------------------------------------ edge cases */

@@ -41,12 +41,14 @@ problem (no chat open) from a WhatsApp UI change (selectors stopped matching).
 
 ### Reading it
 
-At the top you get the page URL and two numbers:
+At the top you get the page URL and four numbers:
 
 | Field | What it means | Healthy value |
 | --- | --- | --- |
 | **Rendered rows** | Message rows WhatsApp currently has in the DOM. | More than 0 when a chat is open. |
 | **Parsed messages** | Messages the parser could build from those rows. | At or near rendered rows. |
+| **Message list** | Whether the scroll container for the history was found. | `scrollable`. `not found` / `not scrollable` means history cannot be loaded — report it with the copy below. |
+| **Scroll height** | Total height of the loaded message list. | Grows while the export runs; a large number means a lot of history is loaded. |
 
 Below that, **Selector health** lists every named selector, the actual CSS selector currently in
 use, and how many elements it matched:
@@ -70,6 +72,8 @@ container, unparseable timestamps, media that could not be read, and similar deg
   conversation panel was not found. Check the panel and title selectors.
 - **Rendered rows > 0, Parsed messages 0** → the rows exist but parsing failed. Look at the
   message-node, timestamp and text selectors; this is a classic post-update break.
+- **Message list is `not found` / `not scrollable`, but selectors match** → the history cannot be
+  scrolled, so only visible messages export. Copy the report and file a bug.
 - **Everything matches, but the export stops early** → not a selector problem; see
   [The export stopped early](#the-export-stopped-early).
 - **Everything matches, but media is missing** → expected for media WhatsApp has not rendered; see
@@ -107,24 +111,40 @@ This is the `NO_MESSAGES` error, meaning the filters removed everything:
 
 ### The export stopped early
 
-The summary and the warnings list explain why. In version 1.0.0 the scroll phase has safety caps:
+The result panel and its warnings list say why. Version 1.0.1 has these safety caps:
 
-- **600 scroll rounds**, and
-- a **240-second** time budget.
+- **4000 scroll rounds**,
+- a **10-minute** time budget, and
+- a **150,000 message** ceiling.
 
-Hitting either produces a warning such as "Stopped after 600 scroll steps…". Other stop reasons:
+Hitting one produces a warning such as "Stopped after 4000 scroll steps…". Other, normal stop
+reasons:
 
-- WhatsApp stopped loading older history (the extension waits three rounds without new rows and
-  treats that as the top).
-- The oldest message reached your date cutoff (this is normal and expected).
-- The WhatsApp tab was reloaded or closed, which tears down the content script
-  (`PAGE_RELOADED`).
+- **The oldest message was reached.** WhatsApp had nothing older to give; the export is complete.
+- **Your date range was covered.** Scrolling stops as soon as the start of the range is loaded.
+- The WhatsApp tab was reloaded or closed, which tears down the content script (`PAGE_RELOADED`).
 - You pressed **Cancel**.
 
-WhatsApp Web virtualises the message list — only a window of rows exists at a time — so a chat with
-years of history may genuinely be longer than WhatsApp is willing to load in one session. For very
-large exports, prefer a date range rather than "All time", keep the tab in the foreground, and retry
-if a load stall cut it short. See also [Why did it stop early?](../README.md#faq).
+How loading works: the extension jumps to the top of the list so WhatsApp fetches the previous page,
+waits for that page to render, parses it, and repeats. When a jump stops producing new messages it
+falls back to viewport-sized scroll steps to nudge builds that only load on real scrolling. It only
+concludes the chat is fully loaded after several attempts produce nothing new.
+
+WhatsApp does not render a whole conversation at once — it loads older pages as the list is
+scrolled, so a long chat takes time. While it runs, the progress line counts messages as they are
+loaded (`Loading older messages… 1,240 so far`). Keep the WhatsApp tab in the foreground for the
+duration; you can press **Cancel** at any point and nothing is saved.
+
+If it stops far short of the beginning of a long chat, open **Diagnostics** and check:
+
+1. **Message list** says `scrollable` (not `not found` / `not scrollable`). If not, the scroll
+   container was not detected — copy the report and file a bug.
+2. **Rendered rows** is much larger than **Parsed messages** — the row markup probably changed.
+3. **Scroll height** is not growing while the progress counter is stuck — WhatsApp is not loading
+   more pages, possibly because the page is in the background.
+
+**Older versions:** 1.0.0 could stop after the messages already on screen when WhatsApp hid the
+message list's scrollbar. That is fixed in 1.0.1 — update and reload the WhatsApp tab.
 
 ### Media is missing from the export
 

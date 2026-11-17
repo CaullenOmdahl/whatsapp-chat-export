@@ -11,6 +11,7 @@ import {
   createEnv,
   loadScripts,
   CONTENT_FILES,
+  fastHistoryLimits,
   makeChrome,
   waitFor,
   saveDownload,
@@ -34,6 +35,7 @@ function bootPage(html) {
   });
   const mock = makeChrome(env.window);
   loadScripts(env.window, [...CONTENT_FILES, 'src/content/content.js']);
+  fastHistoryLimits(env.window);
   const scroller = env.window.document.getElementById('msg-scroller');
   if (scroller) {
     scroller.__scrollHeight = 1200;

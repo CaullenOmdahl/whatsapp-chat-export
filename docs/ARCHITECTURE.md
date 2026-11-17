@@ -60,15 +60,26 @@ auditing what it does with their data. The authoritative technical contract is
 3. **The content script acknowledges immediately** and begins the scroll phase. Progress arrives
    in the popup as `WAX:PROGRESS` broadcasts, and is mirrored to `chrome.storage.session` under
    `wax:state`.
-4. **Scroll phase.** The extractor repeatedly jumps the message-list container to the top, waits
-   for the scroll to settle, and records newly seen message rows keyed by `data-id`. WhatsApp then
-   loads the previous chunk of history. It stops when:
-   - it reaches the top of the loaded history (three consecutive scroll rounds with no new rows),
+4. **Scroll phase.** The extractor repeatedly scrolls the message-list container to the top and
+   waits for the next page of history to render. WhatsApp loads older pages on scroll, so each
+   round gains a chunk. Newly seen rows are parsed **immediately** and stored in an id → message
+   map, which keeps them even if WhatsApp removes their nodes later and makes the progress count
+   exact.
+
+   Two scroll strategies are used: a jump to the very top (fast, triggers a page load), and — when
+   a jump stops producing new messages — viewport-sized steps, which is what a human scroll looks
+   like and covers builds that only load on real scroll gestures. A round is considered "grew" when
+   the number of message nodes or the scroll height increases; otherwise the loop waits while the
+   list is still mutating. It stops when:
+   - no new messages arrive at the top across repeated attempts (the chat is fully loaded),
    - the oldest message seen is older than the selected date cutoff,
-   - a safety cap is hit (**600** scroll rounds or a **240 s** time budget in version 1.0.0), which
-     produces a warning, or
+   - a safety cap is hit (**4000** scroll rounds, a **10-minute** time budget or **150,000**
+     messages), which produces a warning, or
    - the user presses Cancel.
-5. **Parse phase.** For each collected row the extractor reads the message text and metadata,
+5. **Parse phase.** The parsed map from the scroll phase is the primary source. A final DOM pass
+   adds system notices and anything rendered after the last harvest, then the two are merged by
+   `data-id`, timestamps are backfilled for untimed system rows, and the list is sorted. For each
+   message the extractor reads the message text and metadata,
    determines the message type, parses the timestamp, picks up sender name, quoted message and
    reactions, resolves media descriptors, and then applies the options: system-message filter,
    date-range filter and reaction handling.
@@ -103,9 +114,17 @@ element:
 | Reactions | reaction chips inside the bubble | accessible labels |
 | Media | `img`, `video`, `audio`, anchors with `blob:`/`data:` URLs | preview elements with type hints |
 
-The conversation's scroll container is not selected by a fixed selector at all: it is found as the
-nearest scrollable ancestor of a message row, with a fallback search for the deepest scrollable
-element inside the panel. That survives most sidebar/list markup changes.
+The conversation's scroll container is not selected by a fixed selector at all. It is found by
+walking up from a message row and taking the outermost ancestor whose content overflows and which
+actually scrolls — with a fallback search inside the panel. Two details matter in practice:
+
+- Computed `overflow` is **not** required to be `auto`/`scroll`. WhatsApp sometimes hides the
+  scrollbar (`overflow: hidden`) while still letting the list scroll programmatically; requiring a
+  visible scrollbar made the extension miss the container and export only the messages on screen
+  (fixed in 1.0.1).
+- Ambiguous containers are verified with a tiny `scrollTop` probe. Containers that already declare
+  themselves scrollable are not probed, because probing would make WhatsApp load a page of history
+  before the export begins.
 
 When a selector matches nothing, the lookup records a warning and tries the next candidate. The
 diagnostics report (`WAX:DIAGNOSE`) exposes, for every named selector, the CSS selector text and
@@ -115,10 +134,14 @@ zero matches, or `renderedRows > 0` with `parsedMessages == 0`, points straight 
 
 ### Why `data-id`
 
-Each rendered message carries a `data-id` that is unique and stable for that message. Rows are
-recycled as you scroll (virtualised list), so the extractor keeps a map keyed by `data-id` and
-merges new partial observations into existing records. This avoids duplicates and lets the scroll
-loop detect that it has stopped discovering anything new.
+Each rendered message carries a `data-id` that is unique and stable for that message, so it is the
+identity used everywhere: de-duplication, the render count, and the scroll loop's "did anything new
+appear?" check. Only unique ids that look like `true_…`/`false_…` count as messages — raw
+`div[data-id]` nodes are not counted directly, because WhatsApp can nest or re-render them.
+
+Messages are parsed as they appear rather than at the end, so a message whose node is removed
+later still reaches the export. The final DOM pass only adds notices and anything the loop did
+not see.
 
 ### Timestamps
 

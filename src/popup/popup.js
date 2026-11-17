@@ -676,6 +676,11 @@
         selectWrap(state.controls.dateRange),
       ])
     );
+    state.controls.dateRangeHint = el('p', {
+      className: 'blurb option-blurb',
+      id: 'date-range-hint',
+    });
+    card.appendChild(state.controls.dateRangeHint);
 
     state.controls.customStart = el('input', {
       type: 'date',
@@ -847,6 +852,23 @@
     var format = WAEx.getFormat(state.settings.format);
     state.controls.formatBlurb.textContent = format.blurb;
     state.controls.mediaBlurb.textContent = getMediaMode().blurb;
+    updateDateRangeHint();
+  }
+
+  /** Explain how far back the export will scroll for the chosen range. */
+  function updateDateRangeHint() {
+    if (!state.controls.dateRangeHint) return;
+    var range = state.settings.dateRange;
+    if (range === 'all') {
+      state.controls.dateRangeHint.textContent =
+        'Scrolls back through the whole conversation, as far as WhatsApp has it.';
+    } else if (range === 'custom') {
+      state.controls.dateRangeHint.textContent =
+        'Scrolls back until the start date is covered, then stops.';
+    } else {
+      state.controls.dateRangeHint.textContent =
+        'Scrolls back until the whole range is covered, then stops.';
+    }
   }
 
   function getMediaMode() {
@@ -1272,7 +1294,7 @@
     var total = exportState.total === null || exportState.total === undefined ? null : Number(exportState.total);
 
     if (phase === 'scrolling') {
-      return 'Loading messages…' + (loaded > 0 ? ' ' + fmtNum(loaded) + ' loaded' : '');
+      return 'Loading older messages…' + (loaded > 0 ? ' ' + fmtNum(loaded) + ' so far' : '');
     }
     if (phase === 'parsing') return 'Reading messages';
     if (phase === 'media') {
@@ -1989,6 +2011,20 @@
           el('span', { className: 'diag-stat-label', text: 'Parsed messages' }),
           el('span', { className: 'diag-stat-value', text: fmtNum(report.parsedMessages) }),
         ]),
+        el('div', { className: 'diag-stat' }, [
+          el('span', { className: 'diag-stat-label', text: 'Message list' }),
+          el('span', {
+            className: 'diag-stat-value',
+            text: describeScroller(report.scroll),
+          }),
+        ]),
+        el('div', { className: 'diag-stat' }, [
+          el('span', { className: 'diag-stat-label', text: 'Scroll height' }),
+          el('span', {
+            className: 'diag-stat-value',
+            text: describeScrollHeight(report.scroll),
+          }),
+        ]),
       ])
     );
 
@@ -2027,6 +2063,19 @@
       });
       dom.diagBody.appendChild(warningList);
     }
+  }
+
+  /** "scrollable" / "not scrollable" / "not found" for the diagnostics panel. */
+  function describeScroller(scroll) {
+    if (!scroll || typeof scroll !== 'object') return 'unknown';
+    if (!scroll.found) return 'not found';
+    return scroll.scrollable ? 'scrollable' : 'not scrollable';
+  }
+
+  /** Content height of the message list, which explains how much history is loaded. */
+  function describeScrollHeight(scroll) {
+    if (!scroll || !scroll.found) return '—';
+    return fmtNum(scroll.scrollHeight) + ' px';
   }
 
   function copyDiagnosticsReport() {

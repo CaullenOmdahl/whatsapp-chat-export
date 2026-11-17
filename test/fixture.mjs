@@ -169,7 +169,7 @@ export function olderRows(tag = '') {
   ];
 }
 
-export function buildFixtureHtml({ rows = conversationRows(), older = [] } = {}) {
+export function buildFixtureHtml({ rows = conversationRows(), older = [], overflow = 'auto' } = {}) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>WhatsApp</title></head>
@@ -190,7 +190,7 @@ export function buildFixtureHtml({ rows = conversationRows(), older = [] } = {})
           </div></div>
           <div class="_amk4"><span dir="auto" title="online" class="_11JPr">online</span></div>
         </header>
-        <div id="msg-scroller" style="overflow-y:auto;height:600px">
+        <div id="msg-scroller" style="overflow-y:${overflow};height:600px">
           <div role="application" class="x1n2onr6">
             ${older.join('\n')}
             ${rows.join('\n')}

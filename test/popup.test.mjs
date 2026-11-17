@@ -15,6 +15,7 @@ import {
   createEnv,
   loadScripts,
   CONTENT_FILES,
+  fastHistoryLimits,
   makeChrome,
   waitFor,
   suite,
@@ -34,6 +35,7 @@ const contentEnv = createEnv(buildFixtureHtml(), {
 });
 const contentMock = makeChrome(contentEnv.window);
 loadScripts(contentEnv.window, [...CONTENT_FILES, 'src/content/content.js']);
+fastHistoryLimits(contentEnv.window);
 const scroller = contentEnv.window.document.getElementById('msg-scroller');
 scroller.__scrollHeight = 1200;
 scroller.__clientHeight = 600;
@@ -181,6 +183,29 @@ await checkAsync('shows the default options on first run', async () => {
   const mediaSelect = popupDocument.getElementById('media-mode');
   ok(mediaSelect, 'media select missing');
   eq(mediaSelect.value, 'link');
+});
+
+await checkAsync('explains how far back the export will scroll', async () => {
+  const hint = popupDocument.getElementById('date-range-hint');
+  ok(hint, 'date range hint is missing');
+  ok(/whole conversation/i.test(hint.textContent || ''), hint.textContent);
+
+  const select = popupDocument.getElementById('date-range');
+  select.value = '30d';
+  select.dispatchEvent(new popupWindow.Event('change', { bubbles: true }));
+  await waitFor(
+    () => /whole range is covered/i.test(hint.textContent || ''),
+    5000,
+    '30-day hint'
+  );
+
+  select.value = 'all';
+  select.dispatchEvent(new popupWindow.Event('change', { bubbles: true }));
+  await waitFor(
+    () => /whole conversation/i.test(hint.textContent || ''),
+    5000,
+    'all-time hint reset'
+  );
 });
 
 await checkAsync('diagnostics panel renders the selector report', async () => {
