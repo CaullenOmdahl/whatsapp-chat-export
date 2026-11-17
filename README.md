@@ -392,6 +392,7 @@ npm run build         # dist/whatsapp-chat-export-v1.0.1.zip, ready for the Web 
 | `npm run screenshots` | Regenerate the 26 popup screenshots in `test/screenshots/` |
 | `npm run store-shots` | Regenerate the 1280×800 Web Store artwork in `docs/store/` |
 | `npm run examples` | Regenerate the sample exports in `docs/examples/` |
+| `npm run compare -- ours.zip theirs.zip` | Compare an export against another source's export of the same chat (aggregate counts only) |
 | `npm run smoke:chrome` | Load the unpacked extension in real headless Chrome and check it boots |
 
 **What the tests cover:** locale-tolerant date parsing, all four writers (including HTML escaping
