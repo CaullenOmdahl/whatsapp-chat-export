@@ -241,19 +241,32 @@
         },
         onProgress: function (progress) {
           var percent = null;
-          if (bounds.start) {
-            var now = bounds.end || Date.now();
-            if (progress.oldest !== null && now > bounds.start) {
-              var covered = (now - progress.oldest) / (now - bounds.start);
+          var end = bounds.end || Date.now();
+
+          if (bounds.start && bounds.end) {
+            // Both ends known: progress from the oldest loaded message to the range end.
+            if (progress.newest !== null && bounds.end > bounds.start) {
+              var coveredBoth = (progress.newest - bounds.start) / (bounds.end - bounds.start);
+              percent = Math.max(3, Math.min(96, Math.round(coveredBoth * 100)));
+            }
+          } else if (bounds.start) {
+            if (progress.oldest !== null && end > bounds.start) {
+              var covered = (end - progress.oldest) / (end - bounds.start);
               percent = Math.max(3, Math.min(96, Math.round(covered * 100)));
             }
-          } else if (progress.atTop) {
-            percent = null;
           }
+
+          var detail = 'Scrolling back through history';
+          if (progress.direction === 'down') {
+            detail = 'Catching up to the newest message';
+          } else if (progress.atTop) {
+            detail = 'Reached the oldest message';
+          }
+
           reportProgress({
             loaded: progress.loaded,
             percent: percent,
-            detail: progress.atTop ? 'Reached the oldest message' : 'Scrolling back through history',
+            detail: detail,
           });
         },
       });

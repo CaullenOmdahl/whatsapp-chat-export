@@ -125,10 +125,13 @@ reasons:
 - The WhatsApp tab was reloaded or closed, which tears down the content script (`PAGE_RELOADED`).
 - You pressed **Cancel**.
 
-How loading works: the extension jumps to the top of the list so WhatsApp fetches the previous page,
-waits for that page to render, parses it, and repeats. When a jump stops producing new messages it
-falls back to viewport-sized scroll steps to nudge builds that only load on real scrolling. It only
-concludes the chat is fully loaded after several attempts produce nothing new.
+How loading works: the extension walks **backwards to the oldest message and then forwards to the
+newest one**. Backwards, it jumps to the top of the list so WhatsApp fetches the previous page,
+waits for that page to render, parses it, and repeats; when a jump stops producing new messages it
+falls back to viewport-sized scroll steps. If the chat was not showing its newest message when the
+export started (WhatsApp restores your last scroll position), a second pass then steps down to the
+newest message, collecting each page as it loads. It only concludes the chat is complete after
+several attempts in the relevant direction produce nothing new.
 
 WhatsApp does not render a whole conversation at once — it loads older pages as the list is
 scrolled, so a long chat takes time. While it runs, the progress line counts messages as they are
@@ -144,7 +147,9 @@ If it stops far short of the beginning of a long chat, open **Diagnostics** and 
    more pages, possibly because the page is in the background.
 
 **Older versions:** 1.0.0 could stop after the messages already on screen when WhatsApp hid the
-message list's scrollbar. That is fixed in 1.0.1 — update and reload the WhatsApp tab.
+message list's scrollbar (fixed in 1.0.1). 1.0.1 only scrolled upwards, so a chat restored to its
+first message exported only the opening page (fixed in 1.0.2). Update and reload the WhatsApp tab
+if you are on anything older.
 
 ### Media is missing from the export
 

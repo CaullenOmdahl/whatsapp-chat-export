@@ -60,18 +60,22 @@ auditing what it does with their data. The authoritative technical contract is
 3. **The content script acknowledges immediately** and begins the scroll phase. Progress arrives
    in the popup as `WAX:PROGRESS` broadcasts, and is mirrored to `chrome.storage.session` under
    `wax:state`.
-4. **Scroll phase.** The extractor repeatedly scrolls the message-list container to the top and
-   waits for the next page of history to render. WhatsApp loads older pages on scroll, so each
-   round gains a chunk. Newly seen rows are parsed **immediately** and stored in an id → message
-   map, which keeps them even if WhatsApp removes their nodes later and makes the progress count
-   exact.
+4. **Scroll phase, two passes.** The extractor first walks **backwards**: repeatedly scrolling the
+   message-list container to the top and waiting for the previous page to render. WhatsApp loads
+   older pages on scroll, so each round gains a chunk. Newly seen rows are parsed **immediately**
+   and stored in an id → message map, which keeps them even if WhatsApp removes their nodes later
+   and makes the progress count exact. If the conversation was not already showing its newest
+   message when the export started — WhatsApp restores the last scroll position, which may be the
+   first message — a second pass steps **forwards** a viewport at a time until the newest message
+   is reached, loading each appended page. Without that pass a chat scrolled to its start would
+   export only the opening page.
 
    Two scroll strategies are used: a jump to the very top (fast, triggers a page load), and — when
    a jump stops producing new messages — viewport-sized steps, which is what a human scroll looks
    like and covers builds that only load on real scroll gestures. A round is considered "grew" when
    the number of message nodes or the scroll height increases; otherwise the loop waits while the
    list is still mutating. It stops when:
-   - no new messages arrive at the top across repeated attempts (the chat is fully loaded),
+   - no new messages arrive in the direction being walked across repeated attempts,
    - the oldest message seen is older than the selected date cutoff,
    - a safety cap is hit (**4000** scroll rounds, a **10-minute** time budget or **150,000**
      messages), which produces a warning, or

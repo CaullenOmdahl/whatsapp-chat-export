@@ -1,8 +1,8 @@
 {
   "name": "whatsapp-chat-export",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
-  "description": "Chrome extension that exports WhatsApp Web conversations to HTML, TXT, JSON or CSV — fully local, no network.",
+  "description": "Chrome extension that exports WhatsApp Web conversations to HTML, TXT, JSON or CSV \u2014 fully local, no network.",
   "license": "MIT",
   "author": "Caullen Omdahl",
   "type": "module",

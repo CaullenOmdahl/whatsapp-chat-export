@@ -1294,7 +1294,7 @@
     var total = exportState.total === null || exportState.total === undefined ? null : Number(exportState.total);
 
     if (phase === 'scrolling') {
-      return 'Loading older messages…' + (loaded > 0 ? ' ' + fmtNum(loaded) + ' so far' : '');
+      return 'Loading messages…' + (loaded > 0 ? ' ' + fmtNum(loaded) + ' so far' : '');
     }
     if (phase === 'parsing') return 'Reading messages';
     if (phase === 'media') {

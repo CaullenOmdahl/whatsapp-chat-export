@@ -222,10 +222,14 @@ doing in WhatsApp — it restores your scroll position when it is done.
 
 ### How far back does it go?
 
-**As far as WhatsApp has.** With the date range set to *All time* it keeps loading older pages
-until it reaches the first message in the conversation. Pick *Last 30 days* (or a custom range)
-and it stops as soon as the start of that range is covered — which is the fast way to export a
-slice of a very long chat.
+**As far as WhatsApp has.** With the date range set to *All time* it keeps loading pages until it
+reaches the first message in the conversation. Pick *Last 30 days* (or a custom range) and it stops
+as soon as the start of that range is covered — which is the fast way to export a slice of a very
+long chat.
+
+It works from wherever the chat happens to be scrolled: WhatsApp restores your last position, so
+the export first walks back to the oldest message and then forward to the newest one if it did not
+start there. You do not need to scroll to the bottom first.
 
 Safety stops exist so a runaway loop cannot wedge the tab: 4,000 scroll rounds, a 10-minute
 budget, or 150,000 messages. If one is hit, the export completes and says so in the warnings

@@ -325,6 +325,8 @@ export function fastHistoryLimits(window) {
   limits.settleAfterLoadMs = 0;
   limits.maxIdleRounds = 2;
   limits.nudgeSteps = 1;
+  limits.downIdleRounds = 1;
+  limits.stepDelayMs = 0;
   limits.maxScrollSteps = 200;
   limits.timeBudgetMs = 30000;
 }

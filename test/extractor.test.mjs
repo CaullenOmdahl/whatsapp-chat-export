@@ -354,6 +354,90 @@ await checkAsync('keeps messages that WhatsApp removes from the DOM mid-scroll',
   );
 });
 
+/* ------------------------------------- regression: chat not at the newest end */
+
+suite('extractor: bidirectional loading');
+
+await checkAsync('loads the rest of the chat when it starts at the oldest message', async () => {
+  // The real-world failure: WhatsApp restores the last scroll position, which can be
+  // the very beginning of the conversation. Only scrolling up would find nothing and
+  // export just the opening page.
+  const rows = conversationRows();
+  const initial = rows.slice(0, 5);
+  const pages = [rows.slice(5, 9), rows.slice(9)];
+
+  const env = boot(buildFixtureHtml({ rows: initial }));
+  const app = env.document.querySelector('div[role="application"]');
+  const scroller = env.scroller;
+  scroller.__scrollHeight = 700;
+
+  let page = 0;
+  scroller.__onScrollTop = (value) => {
+    const max = scroller.__scrollHeight - scroller.__clientHeight;
+    if (value >= max - 2 && page < pages.length) {
+      const holder = env.document.createElement('div');
+      holder.innerHTML = pages[page++].join('');
+      for (const node of Array.from(holder.children)) app.appendChild(node);
+      scroller.__scrollHeight += 500;
+    }
+  };
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.loaded, 10, 'every message must be collected');
+  eq(result.messages.length, 11, 'plus the encryption notice');
+  eq(result.passes.newer, true, 'the downward pass must run');
+  ok(
+    result.messages.some((message) => /AAA7$/.test(message.id)),
+    'must reach the last message of the chat'
+  );
+});
+
+await checkAsync('loads in both directions when the chat starts mid-history', async () => {
+  const rows = conversationRows();
+  const initial = rows.slice(4, 9);
+  const above = rows.slice(0, 4);
+  const below = [rows.slice(9)];
+
+  const env = boot(buildFixtureHtml({ rows: initial }));
+  const app = env.document.querySelector('div[role="application"]');
+  const scroller = env.scroller;
+  scroller.__scrollHeight = 900;
+
+  let loadedAbove = false;
+  let page = 0;
+  scroller.__onScrollTop = (value) => {
+    const max = scroller.__scrollHeight - scroller.__clientHeight;
+    if (value <= 2 && !loadedAbove) {
+      loadedAbove = true;
+      const holder = env.document.createElement('div');
+      holder.innerHTML = above.join('');
+      const nodes = Array.from(holder.children);
+      for (const node of nodes.reverse()) app.insertBefore(node, app.firstChild);
+      scroller.__scrollHeight += 400;
+    }
+    if (value >= max - 2 && page < below.length) {
+      const holder = env.document.createElement('div');
+      holder.innerHTML = below[page++].join('');
+      for (const node of Array.from(holder.children)) app.appendChild(node);
+      scroller.__scrollHeight += 400;
+    }
+  };
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.loaded, 10, 'messages above and below must both be collected');
+  ok(result.passes.older && result.passes.newer, 'both passes must run');
+});
+
+await checkAsync('skips the downward pass when the newest message is already visible', async () => {
+  const env = boot(buildFixtureHtml());
+  env.scroller.__scrollTop = 600; // bottom of a 1200px list in a 600px viewport
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.startedAtNewest, true);
+  eq(result.passes.newer, false, 'no need to walk forward');
+  eq(result.loaded, 10);
+});
+
 /* ------------------------------------------------------------ edge cases */
 
 suite('extractor: robustness');

@@ -4,6 +4,21 @@ All notable changes to **Chat Export for WhatsApp** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] — 2026-11-18
+
+### Fixed
+
+- **The whole conversation is exported, not just the part that was on screen.** The
+  loader only ever scrolled upwards, so if WhatsApp had restored the chat to the
+  beginning (or anywhere other than the newest message) it found "nothing older" and
+  stopped. A second pass now walks down to the newest message whenever the conversation
+  did not start there, collecting every page as it loads. Confirmed against a phone
+  export of an 811-message chat: v1.0.1 exported the opening 26 messages, v1.0.2
+  exports all 811.
+- Progress explains which direction is running ("Scrolling back through history" /
+  "Catching up to the newest message").
+- Date ranges with both ends now report coverage-based progress.
+
 ## [1.0.1] — 2026-11-18
 
 ### Fixed

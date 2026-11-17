@@ -37,6 +37,10 @@
     maxIdleRounds: 4,
     /** Incremental rounds before we conclude the chat is fully loaded. */
     nudgeSteps: 3,
+    /** Idle rounds at the bottom before we conclude the newest message is reached. */
+    downIdleRounds: 3,
+    /** Delay between fast downward steps through already-rendered messages. */
+    stepDelayMs: 30,
     settleAfterLoadMs: 80,
     /** Absolute ceiling, so a runaway loop cannot exhaust memory. */
     maxMessages: 150000,
@@ -478,8 +482,9 @@
   /* --------------------------------------------------------- history load */
 
   /** Tell the page it was scrolled; some builds only react to the event, not scrollTop. */
-  function nudgeScroll(scroller) {
+  function nudgeScroll(scroller, direction) {
     if (!scroller) return;
+    var sign = direction === 'down' ? 1 : -1;
     try {
       scroller.dispatchEvent(new Event('scroll', { bubbles: false }));
     } catch (err) {
@@ -490,7 +495,7 @@
       var box = scroller.getBoundingClientRect ? scroller.getBoundingClientRect() : null;
       scroller.dispatchEvent(
         new global.WheelEvent('wheel', {
-          deltaY: -Math.round((scroller.clientHeight || 600) * 0.8),
+          deltaY: sign * Math.round((scroller.clientHeight || 600) * 0.8),
           deltaMode: 0,
           bubbles: true,
           cancelable: true,
@@ -569,20 +574,24 @@
   }
 
   /**
-   * Load as much of the conversation history as WhatsApp will give us.
+   * Load the whole conversation, whichever direction it needs.
    *
-   * Loop: scroll towards the top, wait for the next page to render, parse only the
-   * messages we have not seen yet. Parsing as we go means messages are kept even if
-   * WhatsApp later removes their nodes, and it makes the progress counter honest.
+   * The list is parsed as it renders, so messages stay even if WhatsApp removes their
+   * nodes later, and the progress counter is exact.
    *
-   * Scrolling happens in two modes: jump to the very top (fast; WhatsApp fetches a
-   * page of history), and — when a jump stops producing new messages — incremental
-   * viewport-sized steps, which is what a human scroll looks like and nudges builds
-   * that only load on real scroll gestures. It stops when:
-   *   - the requested date range is covered (`dateBounds.start`),
-   *   - the list is already at the oldest message,
-   *   - the time/step/message budgets run out, or
-   *   - the user cancels.
+   * Two passes:
+   *
+   *   1. **Older.** Repeatedly scroll to the top so WhatsApp fetches earlier pages,
+   *      with viewport-sized steps when jumping stops helping. Stops at the first
+   *      message or when the selected start date is covered.
+   *   2. **Newer.** If the conversation was not already showing its newest message
+   *      when the export started (WhatsApp restores the last scroll position, so it
+   *      can be anywhere), walk down the list a viewport at a time until the newest
+   *      message is reached, loading each page WhatsApp appends.
+   *
+   * Pass 2 is what makes an export complete when the chat happens to be scrolled to
+   * the beginning: pass 1 correctly finds nothing older, and without walking forward
+   * the rest of the conversation would never be seen.
    */
   async function loadAllHistory(options) {
     var opts = options || {};
@@ -602,7 +611,11 @@
 
     var scroller = findScrollContainer(main);
     var warnings = [];
-    var originalTop = scroller ? scroller.scrollTop : 0;
+    var originalTop = scroller ? scroller.scrollTop || 0 : 0;
+    var originalHeight = scroller ? scroller.scrollHeight || 0 : 0;
+    var originalClient = scroller ? scroller.clientHeight || 0 : 0;
+    // Was the newest message already on screen when the export started?
+    var startedAtNewest = Boolean(scroller) && originalTop + originalClient >= originalHeight - 8;
 
     var collected = Object.create(null); // message id -> parsed Message
     var seen = Object.create(null); // message id -> node, kept for recovery/diagnostics
@@ -613,7 +626,18 @@
       lastTimestamp: null,
     };
 
-    function harvest() {
+    var startedAt = Date.now();
+    var rounds = 0;
+    var cancelled = false;
+
+    function listMetrics() {
+      return {
+        nodes: main.querySelectorAll ? main.querySelectorAll('div[data-id]').length : 0,
+        height: scroller && scroller.isConnected ? scroller.scrollHeight || 0 : 0,
+      };
+    }
+
+    function collect() {
       var nodes = messageNodes(main);
       var added = 0;
       for (var i = 0; i < nodes.length; i++) {
@@ -631,13 +655,81 @@
       return added;
     }
 
-    var parsedCount = harvest();
-    onProgress({
-      loaded: parsedCount,
-      oldest: collectedOldest(collected),
-      atTop: !scroller,
-      rounds: 0,
-    });
+    function extent() {
+      var oldest = null;
+      var newest = null;
+      for (var id in collected) {
+        if (!hasOwn(collected, id)) continue;
+        var timestamp = collected[id].timestamp;
+        if (timestamp === null || timestamp === undefined) continue;
+        if (oldest === null || timestamp < oldest) oldest = timestamp;
+        if (newest === null || timestamp > newest) newest = timestamp;
+      }
+      return { oldest: oldest, newest: newest };
+    }
+
+    function report(direction) {
+      var bounds = extent();
+      var atTop = !scroller || (scroller.scrollTop || 0) <= 2;
+      var atBottom = !scroller || (scroller.scrollTop || 0) + (scroller.clientHeight || 0) >= (scroller.scrollHeight || 0) - 4;
+      onProgress({
+        loaded: countKeys(collected),
+        oldest: bounds.oldest,
+        newest: bounds.newest,
+        atTop: atTop,
+        atBottom: atBottom,
+        direction: direction,
+        rounds: rounds,
+      });
+    }
+
+    /** Shared stop conditions. Returns true when the loop must end. */
+    function finished() {
+      if (shouldCancel()) {
+        cancelled = true;
+        return true;
+      }
+      if (rounds >= LIMITS.maxScrollSteps) {
+        warnings.push(
+          'Stopped after ' +
+            LIMITS.maxScrollSteps +
+            ' scroll steps. The conversation may have messages that were not loaded.'
+        );
+        return true;
+      }
+      if (Date.now() - startedAt > LIMITS.timeBudgetMs) {
+        warnings.push(
+          'Stopped after ' +
+            Math.round((Date.now() - startedAt) / 1000) +
+            's so the export would finish. Messages may be missing.'
+        );
+        return true;
+      }
+      if (countKeys(collected) >= LIMITS.maxMessages) {
+        warnings.push(
+          'Stopped at ' +
+            WAEx.plural(LIMITS.maxMessages, 'message') +
+            '. The rest of the conversation was not loaded.'
+        );
+        return true;
+      }
+      return false;
+    }
+
+    function startDateCovered() {
+      if (!opts.dateBounds || !opts.dateBounds.start) return false;
+      var oldest = extent().oldest;
+      return oldest !== null && oldest < opts.dateBounds.start;
+    }
+
+    function endDateCovered() {
+      if (!opts.dateBounds || !opts.dateBounds.end) return false;
+      var newest = extent().newest;
+      return newest !== null && newest > opts.dateBounds.end;
+    }
+
+    var parsedCount = collect();
+    report('idle');
 
     if (!scroller) {
       warnings.push(
@@ -646,92 +738,98 @@
       );
     }
 
-    var startedAt = Date.now();
-    var rounds = 0;
-    var idleAtTop = 0;
-    var idleRounds = 0;
-    var mode = 'jump';
-    var cancelled = false;
+    /* ---------------------------------------------------- pass 1: older */
 
-    while (scroller && !cancelled) {
-      if (shouldCancel()) {
-        cancelled = true;
-        break;
-      }
-      if (rounds >= LIMITS.maxScrollSteps) {
-        warnings.push(
-          'Stopped after ' +
-            LIMITS.maxScrollSteps +
-            ' scroll steps. The conversation may have older messages that were not loaded.'
-        );
-        break;
-      }
-      if (Date.now() - startedAt > LIMITS.timeBudgetMs) {
-        warnings.push(
-          'Stopped after ' +
-            Math.round((Date.now() - startedAt) / 1000) +
-            's so the export would finish. Older messages may be missing.'
-        );
-        break;
-      }
-      if (parsedCount >= LIMITS.maxMessages) {
-        warnings.push(
-          'Stopped at ' +
-            WAEx.plural(LIMITS.maxMessages, 'message') +
-            '. The rest of the conversation was not loaded.'
-        );
-        break;
-      }
+    if (scroller && !finished()) {
+      var idleAtTop = 0;
+      var idleRounds = 0;
+      var mode = 'jump';
 
-      var atTopBefore = scroller.scrollTop <= 2;
-      var baseline = {
-        nodes: main.querySelectorAll('div[data-id]').length,
-        height: scroller.scrollHeight || 0,
-      };
+      while (!finished()) {
+        var atTopBefore = (scroller.scrollTop || 0) <= 2;
+        var baseline = listMetrics();
 
-      if (mode === 'jump') {
-        scroller.scrollTop = 0;
-      } else {
-        var step = Math.max(160, Math.round((scroller.clientHeight || 600) * 0.8));
-        scroller.scrollTop = Math.max(0, scroller.scrollTop - step);
-      }
-      nudgeScroll(scroller);
+        if (mode === 'jump') {
+          scroller.scrollTop = 0;
+        } else {
+          var stepUp = Math.max(160, Math.round((scroller.clientHeight || 600) * 0.8));
+          scroller.scrollTop = Math.max(0, (scroller.scrollTop || 0) - stepUp);
+        }
+        nudgeScroll(scroller, 'up');
 
-      var change = await waitForDomChange(scroller, baseline);
-      var added = harvest();
-      parsedCount += added;
-      rounds++;
+        var changeUp = await waitForDomChange(scroller, baseline);
+        var addedUp = collect();
+        parsedCount += addedUp;
+        rounds++;
+        report('up');
 
-      var oldest = collectedOldest(collected);
-      var atTop = scroller.scrollTop <= 2;
+        if (startDateCovered()) break;
 
-      onProgress({
-        loaded: parsedCount,
-        oldest: oldest,
-        atTop: atTop,
-        rounds: rounds,
-        grew: change.grew,
-      });
-
-      if (opts.dateBounds && opts.dateBounds.start && oldest !== null) {
-        if (oldest < opts.dateBounds.start) break;
-      }
-
-      if (change.grew || added > 0) {
-        idleRounds = 0;
-        idleAtTop = 0;
-        mode = 'jump';
-      } else if (atTopBefore && atTop) {
-        // Already showing the oldest message and nothing new arrived.
-        idleAtTop++;
-        if (idleAtTop >= 2) break;
-      } else {
-        idleRounds++;
-        if (mode === 'jump' && idleRounds >= LIMITS.maxIdleRounds) {
-          mode = 'nudge';
+        if (changeUp.grew || addedUp > 0) {
           idleRounds = 0;
-        } else if (mode === 'nudge' && idleRounds >= LIMITS.nudgeSteps) {
-          break;
+          idleAtTop = 0;
+          mode = 'jump';
+        } else if (atTopBefore && (scroller.scrollTop || 0) <= 2) {
+          // Already showing the first message and nothing older arrived.
+          idleAtTop++;
+          if (idleAtTop >= 2) break;
+        } else {
+          idleRounds++;
+          if (mode === 'jump' && idleRounds >= LIMITS.maxIdleRounds) {
+            mode = 'nudge';
+            idleRounds = 0;
+          } else if (mode === 'nudge' && idleRounds >= LIMITS.nudgeSteps) {
+            break;
+          }
+        }
+      }
+    }
+
+    /* ---------------------------------------------------- pass 2: newer */
+
+    // Only needed when the conversation was not already at its newest message. If it
+    // was, pass 1 loaded everything above and the bottom is unchanged.
+    if (scroller && !cancelled && !startedAtNewest && !endDateCovered()) {
+      var idleAtBottom = 0;
+
+      while (!finished()) {
+        var remaining =
+          (scroller.scrollHeight || 0) - ((scroller.scrollTop || 0) + (scroller.clientHeight || 0));
+        var atBottom = remaining <= 4;
+
+        if (atBottom) {
+          var baselineDown = listMetrics();
+          nudgeScroll(scroller, 'down');
+          var changeDown = await waitForDomChange(scroller, baselineDown);
+          var addedDown = collect();
+          parsedCount += addedDown;
+          rounds++;
+          report('down');
+
+          if (endDateCovered()) break;
+
+          if (changeDown.grew || addedDown > 0) {
+            idleAtBottom = 0;
+          } else {
+            idleAtBottom++;
+            if (idleAtBottom >= LIMITS.downIdleRounds) break;
+          }
+        } else {
+          // Content below is already rendered: step through it without waiting.
+          var stepDown = Math.max(120, Math.round((scroller.clientHeight || 600) * 0.9));
+          scroller.scrollTop = Math.min(
+            scroller.scrollHeight || 0,
+            (scroller.scrollTop || 0) + stepDown
+          );
+          nudgeScroll(scroller, 'down');
+          await sleep(LIMITS.stepDelayMs);
+
+          var addedStep = collect();
+          parsedCount += addedStep;
+          rounds++;
+          report('down');
+          idleAtBottom = 0;
+          if (endDateCovered()) break;
         }
       }
     }
@@ -739,7 +837,7 @@
     await sleep(LIMITS.settleAfterLoadMs);
 
     // Final pass over the DOM: picks up system notices and anything rendered since the
-    // last harvest, and merges in messages that were virtualised away while scrolling.
+    // last collect, and merges messages that were virtualised away while scrolling.
     var domResult = parseMessages({
       main: main,
       harvested: seen,
@@ -755,7 +853,18 @@
     merged = backfillAndSort(merged);
 
     warnings = warnings.concat(domResult.warnings || []);
-    if (cancelled) warnings.push('Export cancelled while history was still loading.');
+    if (cancelled) warnings.push('Export cancelled while messages were still loading.');
+    if (!startedAtNewest && scroller && !cancelled) {
+      var all = extent();
+      if (all.newest !== null && domResult.messages.length) {
+        var lastKnown = domResult.messages[domResult.messages.length - 1];
+        if (lastKnown.timestamp !== null && lastKnown.timestamp < all.newest) {
+          warnings.push(
+            'The newest message may not have been reached. Please report this with the Diagnostics output.'
+          );
+        }
+      }
+    }
 
     return {
       main: main,
@@ -766,6 +875,8 @@
       messages: merged,
       loaded: countKeys(collected),
       rounds: rounds,
+      passes: { older: Boolean(scroller), newer: Boolean(scroller) && !startedAtNewest },
+      startedAtNewest: startedAtNewest,
       scroll: scrollInfo(scroller),
       warnings: warnings,
       cancelled: cancelled,
