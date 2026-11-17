@@ -42,6 +42,23 @@ disk.
 
 ---
 
+<p align="center">
+  <a href="#why-this-exists">Why</a> ·
+  <a href="#what-you-get">What you get</a> ·
+  <a href="#the-file-you-actually-get">The output</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#use-it">Use it</a> ·
+  <a href="#options">Options</a> ·
+  <a href="#privacy">Privacy</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="#troubleshooting">Troubleshooting</a> ·
+  <a href="#development">Development</a> ·
+  <a href="#contributing-security-and-support">Contributing</a>
+</p>
+
+---
+
 ## What you get
 
 | Format | File | Best for | What is inside |
