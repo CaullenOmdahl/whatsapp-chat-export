@@ -1,79 +1,164 @@
-# Chat Export for WhatsApp
+<p align="center">
+  <img src="icons/icon128.png" width="88" height="88" alt="Chat Export for WhatsApp icon">
+</p>
 
-[![CI](https://github.com/CaullenOmdahl/whatsapp-chat-export/actions/workflows/ci.yml/badge.svg)](https://github.com/CaullenOmdahl/whatsapp-chat-export/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-00a884.svg)](LICENSE)
-[![No network](https://img.shields.io/badge/network-none-00a884.svg)](#privacy)
-[![Manifest V3](https://img.shields.io/badge/manifest-v3-00a884.svg)](manifest.json)
+<h1 align="center">Chat Export for WhatsApp</h1>
 
-**Save any WhatsApp Web conversation as a self-contained HTML transcript, plain text, structured JSON, or a spreadsheet-ready CSV — locally, in one click.**
+<p align="center">
+  <b>WhatsApp Web has no save button. This is the save button.</b><br>
+  Turn the conversation you have open into an HTML transcript, plain text, structured JSON
+  or a spreadsheet-ready CSV — with its photos and documents — without a single byte leaving
+  your browser.
+</p>
 
-> **Why this exists:** WhatsApp lets you "export chat" on your phone, but on WhatsApp Web there is no save button. This extension adds one, and it never sends your messages anywhere.
+<p align="center">
+  <a href="https://github.com/CaullenOmdahl/whatsapp-chat-export/actions/workflows/ci.yml"><img src="https://github.com/CaullenOmdahl/whatsapp-chat-export/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/CaullenOmdahl/whatsapp-chat-export/releases"><img src="https://img.shields.io/github/v/release/CaullenOmdahl/whatsapp-chat-export?color=00a884&label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/license-MIT-00a884" alt="MIT license">
+  <img src="https://img.shields.io/badge/manifest-v3-00a884" alt="Manifest V3">
+  <img src="https://img.shields.io/badge/network-none-00a884" alt="No network access">
+</p>
 
-> **Not affiliated with, endorsed by, or sponsored by WhatsApp LLC or Meta.** "WhatsApp" is used only to describe compatibility with WhatsApp Web.
-
----
-
-## Contents
-
-- [Status](#status)
-- [Features](#features)
-- [Install](#install)
-- [Usage](#usage)
-- [What the four formats look like](#what-the-four-formats-look-like)
-- [How it works](#how-it-works)
-- [Options reference](#options-reference)
-- [FAQ](#faq)
-- [Troubleshooting](#troubleshooting)
-- [Development](#development)
-- [Contributing, security and support](#contributing-security-and-support)
-- [Privacy](#privacy)
-- [License](#license)
+<p align="center">
+  <img src="docs/store/screenshot-1-export.png" width="880" alt="The popup: chat card, format picker, date range, media options and the Export chat button">
+</p>
 
 ---
 
-## Status
+## Why this exists
 
-**1.0.0 — pre-release, being tested.** Load it unpacked and try it against your own chats; the
-Chrome Web Store listing is being prepared. See [CHANGELOG.md](CHANGELOG.md) for what shipped and
-[docs/RELEASING.md](docs/RELEASING.md) for the release and store checklist. Bug reports are welcome
-via the issue templates.
+Your phone can export a chat. WhatsApp Web cannot. If the conversation lives on your laptop —
+work threads, a project group, a family chat you want to keep — there is no button that says
+"save this", and no official way to get a readable file out of it.
+
+This extension is that button. It reads the conversation you already have open, scrolls back
+through its history for you, and writes a clean file to your downloads folder. No account, no
+server, no upload, no telemetry, no "sign in with Google". The chat stays between you and your
+disk.
+
+> **Not affiliated with, endorsed by, or sponsored by WhatsApp LLC or Meta.** "WhatsApp" is used
+> only to describe compatibility with WhatsApp Web. The extension reads the page you have open;
+> it never sends, deletes or automates anything.
 
 ---
 
-## Features
+## What you get
 
-| Format | Best for | What you get |
-| --- | --- | --- |
-| **HTML** | Reading and archiving | A styled page that opens in any browser; CSS inline, no JavaScript. With media download, the report and its files ship together in one `.zip`. |
-| **TXT** | Portability and search | WhatsApp-style plain text (`[date, time] Sender: message`), readable in any editor. |
-| **JSON** | Scripts and analysis | One message per object with ids, timestamps, authors, types, text, quotes, reactions and media metadata. |
-| **CSV** | Excel and Google Sheets | One row per message; quoted for commas, quotes and newlines. |
+| Format | File | Best for | What is inside |
+| --- | --- | --- | --- |
+| **HTML** | `.html` | Reading and archiving | A styled transcript with chat bubbles, day dividers, avatars' names, quoted replies, reactions and timestamps. One self-contained page: no scripts, no external assets, prints cleanly, dark-mode aware. |
+| **Text** | `.txt` | Grep, backups, portability | WhatsApp-like plain text with a header, day dividers and one block per message. Emoji survive; quotes and reactions are indented. |
+| **JSON** | `.json` | Scripts, analysis, LLM pipelines | Every message as an object with id, epoch + ISO timestamp, author, direction, type, text, quote, reactions and media metadata, plus conversation statistics. |
+| **CSV** | `.csv` | Excel, Sheets, data tools | One row per message, UTF-8 with BOM (so Excel reads emoji correctly), RFC 4180 quoting. |
 
-Plus:
+**Media comes along, optionally.** Set media handling to *Download* and you get a single
+`.zip` containing the report and the files it references:
 
-- **One-click export** of the conversation that is currently open. The extension scrolls up through the chat by itself to load history as it goes.
-- **Loads the whole history.** It scrolls back through the conversation until WhatsApp has nothing older to give — or until the date range you picked is covered — and says so if it ever hits a limit.
-- **Date ranges:** all time, last 7 / 30 / 90 days, or a custom start–end range. Older messages are skipped and early scrolling stops once the cutoff is reached.
-- **Media handling:** skip media, leave a placeholder letting you see where each item was, or download the capturable media. Media exports arrive as a single `.zip` containing the report and the files it references.
-- **Include system messages** (joins, leaves, "Messages and calls are end-to-end encrypted", etc.) if you want them.
-- **Include reactions**, and toggle **sender names** on or off.
-- **Live progress with a Cancel button.** Closing the popup does not stop an export; reopen it and the live progress is restored.
-- **Recent export history** for the last five exports.
-- **Diagnostics panel** that shows which page selectors matched, so it is obvious when WhatsApp changes its UI and this extension needs an update.
-- **100% local.** No account, no server, no telemetry, no network requests at all. See [PRIVACY.md](PRIVACY.md).
+```text
+WhatsApp Chat with Design Team - 2026-11-18.zip
+├── WhatsApp Chat with Design Team - 2026-11-18.html
+└── media/
+    ├── 0001-image.jpg
+    ├── 0002-voice-note.ogg
+    └── 0003-Q4-plan.pdf
+```
+
+WhatsApp only exposes media that has been rendered on screen, so anything never loaded in the
+chat is exported as a clearly marked placeholder instead of being silently dropped. The
+extension tells you how many items were captured and how many were missing.
+
+---
+
+## The file you actually get
+
+<p align="center">
+  <img src="docs/examples/example-chat-preview.png" width="880" alt="An exported HTML transcript open in a browser: chat name, message count, day divider, quoted reply, image with caption and reactions">
+</p>
+
+Real generated samples of all four formats live in [`docs/examples/`](docs/examples/) —
+[HTML](docs/examples/example-chat.html), [TXT](docs/examples/example-chat.txt),
+[JSON](docs/examples/example-chat.json), [CSV](docs/examples/example-chat.csv). Download the
+HTML one and open it in a browser to see exactly what you would get.
+
+A few lines of the text output:
+
+```text
+WhatsApp Chat with Design Team
+Exported 2026-11-18 09:30:00 · 10 messages
+Conversation dates: 12 Nov 2023 – 25 Dec 2023
+-------------------------------------------------------
+
+--- 12 Nov 2023 ---
+
+[2023-11-12 09:15:00] Alice: Yes! Let's do 10am
+    > Bob: Are we still on for Friday?
+[2023-11-12 09:16:00] Bob: Perfect.
+    I'll bring coffee ☕
+[2023-11-12 09:20:00] You: Great 👍
+[2023-11-12 09:21:00] Bob: [Photo -> media/0001-image.jpg] Here's the deck
+    reactions: 👍 2
+```
+
+<details>
+<summary><b>Full CSV columns</b></summary>
+
+```text
+timestamp_iso, timestamp_ms, date, time, author, direction, type, text,
+quoted_author, quoted_text, reactions, media_kind, media_file, media_missing, message_id
+```
+
+</details>
+
+<details>
+<summary><b>JSON shape</b></summary>
+
+```json
+{
+  "schema": "chat-export/v1",
+  "generator": "Chat Export for WhatsApp 1.0.1",
+  "exportedAt": "2026-11-18T02:30:00.000Z",
+  "chat": { "name": "Design Team", "isGroup": true },
+  "settings": { "format": "json", "mediaMode": "link", "includeSystem": false,
+                "includeReactions": true, "dateRange": "all" },
+  "stats": { "total": 10, "incoming": 6, "outgoing": 4,
+             "byType": { "text": 6, "image": 1, "document": 1, "voice": 1, "deleted": 1 },
+             "participants": [ { "name": "Bob", "count": 5 }, { "name": "You", "count": 4 },
+                              { "name": "Alice", "count": 1 } ],
+             "dateRange": { "start": "2023-11-12T02:15:00.000Z",
+                            "end": "2023-12-25T11:02:00.000Z" } },
+  "messages": [
+    {
+      "id": "false_120363000000000000@g.us_AAA1",
+      "timestamp": 1699755300000,
+      "timestampISO": "2023-11-12T02:15:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:15:00",
+      "author": "Alice",
+      "direction": "incoming",
+      "type": "text",
+      "text": "Yes! Let's do 10am",
+      "quoted": { "author": "Bob", "text": "Are we still on for Friday?" },
+      "reactions": [],
+      "media": null
+    }
+  ]
+}
+```
+
+</details>
 
 ---
 
 ## Install
 
-This build is installed from source (unpacked), not from a store listing. It takes about a minute.
+The extension is not on the Chrome Web Store yet — it is in testing, and store review is the next
+step. Installing the unpacked build takes about a minute and works in any Chromium browser.
 
-### Option A — download a release (easiest)
+### Option A — grab a release (easiest)
 
-1. Open the [Releases](https://github.com/CaullenOmdahl/whatsapp-chat-export/releases) page and download
-   `whatsapp-chat-export-v*.zip` from the latest release.
+1. Open **[Releases](https://github.com/CaullenOmdahl/whatsapp-chat-export/releases)** and download
+   `whatsapp-chat-export-v1.0.1.zip` from the latest release.
 2. Extract it. You should end up with a folder containing `manifest.json`.
-3. Continue from step 2 under Option B.
 
 ### Option B — from source
 
@@ -82,434 +167,245 @@ git clone https://github.com/CaullenOmdahl/whatsapp-chat-export.git
 cd whatsapp-chat-export
 ```
 
-You should end up in a folder named `whatsapp-chat-export` that contains `manifest.json`.
+### Then, either way
 
-1. Open **`chrome://extensions`** in Chrome (or `edge://extensions` in Edge, `brave://extensions` in
-   Brave, `arc://extensions` in Arc).
-2. Turn on **Developer mode** (top-right toggle).
-3. Click **Load unpacked**.
-4. Select the **`whatsapp-chat-export`** folder itself — the folder that contains `manifest.json`,
-   not the folder above it.
-5. Open **<https://web.whatsapp.com>** and log in by scanning the QR code with your phone.
-6. Open the chat you want to export.
-7. Click the extension's toolbar icon. Pin it first if you like (puzzle-piece icon → pin).
-8. Choose a format and options, then click **Export chat**.
-9. The finished file lands in your browser's **Downloads** folder. If you chose media download, you
-   get a single `.zip` holding both the report and its media files.
+1. Open **`chrome://extensions`** (or `edge://extensions`, `brave://extensions`, `arc://extensions`).
+2. Turn on **Developer mode** (top-right).
+3. Click **Load unpacked** and select the folder that contains `manifest.json` — the extension
+   folder itself, not its parent.
+4. Pin the extension (puzzle-piece icon → pin) so the button is one click away.
+5. Open <https://web.whatsapp.com>, log in by scanning the QR code, and open the chat you want.
 
-To update, pull the new code (or download the newer release) and press the reload icon on the
-extension's card in `chrome://extensions`. Reload any open WhatsApp Web tab afterwards.
+Updating later: replace the folder contents (or load the newer release) and press the reload icon
+on the extension's card, then reload the WhatsApp tab.
 
-> **Requirements:** Chrome 102+ or a Chromium browser with equivalent Manifest V3 support (current
-> Edge, Brave or Arc), a working WhatsApp Web session, and the chat open in the active tab. There is
-> no build step — the extension is plain, dependency-free JavaScript. Node.js 22+ is only needed to
-> run the tests and build the release zip.
-
-## Usage
-
-1. Open <https://web.whatsapp.com> and open a chat or group.
-2. Click the toolbar icon.
-3. Pick a format, a date range, and how to handle media.
-4. Click **Export chat**. Keep the tab open; the popup shows live progress. You can close the popup while it runs — the export continues and the progress bar is restored when you reopen it.
-5. Watch for the completion summary (message count, file size, any warnings) and open the downloaded file.
-
-Reports are named like `WhatsApp Chat with Alice - 2026-11-18.html`. With media download enabled, the archive is a single file, `WhatsApp Chat with Alice - 2026-11-18.zip`, containing the report at its root and the captured files under `media/`; the report references them by that relative path. Extract the archive to view the report with its media in place.
-
-### What the four formats look like
-
-Real files generated by the shipped writers live in [`docs/examples/`](docs/examples/): [HTML](docs/examples/example-chat.html), [TXT](docs/examples/example-chat.txt), [JSON](docs/examples/example-chat.json), [CSV](docs/examples/example-chat.csv). Open the HTML one in a browser to see exactly what an export looks like. Regenerate them with `npm run examples`.
-
-The examples below use a short conversation between **Alice** and **Bob** and are abridged — the HTML has extra inline CSS, and the JSON has a `stats` block and two more messages.
-
-**HTML** — a styled, self-contained transcript (styles inlined; no scripts, no external assets):
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>WhatsApp Chat with Bob</title>
-  <style>/* WhatsApp-like transcript styles, inlined */</style>
-</head>
-<body>
-  <div class="wrap">
-    <header class="top"><h1>Bob</h1><p>3 messages · 17 Nov 2026</p></header>
-    <div class="day"><span>17 Nov 2026</span></div>
-    <div class="msg in">
-      <div class="bubble">
-        <div class="author">Bob</div>
-        <div class="text">Are we still on for tomorrow?</div>
-        <div class="meta"><span>14:02</span></div>
-      </div>
-    </div>
-    <div class="msg out">
-      <div class="bubble">
-        <div class="text">Yes — I'll bring the slides.</div>
-        <div class="meta"><span>14:03</span></div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>
-```
-
-**TXT** — plain text with a header and a day divider, close to WhatsApp's own export:
-
-```text
-WhatsApp Chat with Bob
-Exported 2026-11-18 08:20:00 · 3 messages
-Conversation dates: 17 Nov 2026 – 17 Nov 2026
---------------------------------------------------------
-
---- 17 Nov 2026 ---
-
-[2026-11-17 14:02:00] Bob: Are we still on for tomorrow?
-[2026-11-17 14:03:00] Alice: Yes — I'll bring the slides.
-[2026-11-17 14:05:00] Bob: Perfect. See you at 9.
-```
-
-**JSON** — structured for scripts (schema shown abridged):
-
-```json
-{
-  "schema": "chat-export/v1",
-  "generator": "Chat Export for WhatsApp 1.0.0",
-  "exportedAt": "2026-11-18T01:20:00.000Z",
-  "chat": { "name": "Bob", "isGroup": false },
-  "settings": { "format": "json", "mediaMode": "link", "includeSystem": false,
-                "includeReactions": true, "dateRange": "all" },
-  "stats": { "total": 3, "incoming": 2, "outgoing": 1, "byType": { "text": 3 },
-             "participants": [ { "name": "Bob", "count": 2 } ],
-             "dateRange": { "start": "2026-11-17T07:02:00.000Z",
-                            "end": "2026-11-17T07:05:00.000Z" } },
-  "messages": [
-    {
-      "id": "false_1234567890@c.us_3EB0A1B2C3D4",
-      "timestamp": 1794898920000,
-      "timestampISO": "2026-11-17T07:02:00.000Z",
-      "date": "2026-11-17",
-      "time": "14:02:00",
-      "author": "Bob",
-      "direction": "incoming",
-      "type": "text",
-      "text": "Are we still on for tomorrow?",
-      "quoted": null,
-      "reactions": [],
-      "media": null
-    }
-  ]
-}
-```
-
-**CSV** — one row per message, UTF-8 with a BOM so Excel detects the encoding:
-
-```csv
-timestamp_iso,timestamp_ms,date,time,author,direction,type,text,quoted_author,quoted_text,reactions,media_kind,media_file,media_missing,message_id
-2026-11-17T07:02:00.000Z,1794898920000,2026-11-17,14:02:00,Bob,incoming,text,Are we still on for tomorrow?,,,,,,,false_1234567890@c.us_3EB0A1B2C3D4
-2026-11-17T07:03:00.000Z,1794898980000,2026-11-17,14:03:00,Alice,outgoing,text,Yes — I'll bring the slides.,,,,,,,true_1234567890@c.us_3EB0A1B2C3D4
-```
+> **Requirements:** Chrome 102+ or a Chromium browser with equivalent Manifest V3 support
+> (current Edge, Brave, Arc). A working WhatsApp Web session and the chat open in the active tab.
+> There is no build step and no runtime dependency — the extension is plain JavaScript.
+> Node.js 22+ is only needed to run the tests and build the release zip.
 
 ---
 
-## How it works
+## Use it
 
-- **A content script runs inside the WhatsApp Web tab.** It only activates on `https://web.whatsapp.com/*`, reads the page that is already rendered in your browser, and has no network access of its own.
-- **It finds the conversation panel and the message list** through a small set of selectors, each with a fallback chain. If a lookup fails, the export records a warning instead of crashing.
-- **It loads history by scrolling back through the conversation.** It jumps to the top of the list so WhatsApp fetches the previous page, waits for the next page to render, and parses only the messages it has not seen yet. When a jump stops producing new messages it switches to viewport-sized scroll steps (what a human scroll looks like) before concluding the chat is fully loaded. It stops at the oldest message, once your date range is covered, or at a documented safety limit.
-- **Each rendered message is identified by its `data-id` attribute**, which is stable enough to avoid double-counting when rows are recycled while scrolling. Timestamps are read from WhatsApp's `data-pre-plain-text` attribute (or the row's time element as a fallback).
-- **Messages are parsed into a common shape** (author, outgoing flag, type, text, quote, reactions, media) so HTML, TXT, JSON and CSV all come from one pass.
-- **Media is captured from what WhatsApp has already rendered.** Images and other previews are fetched from the blob/data URLs in the page and bundled with the report into a generated `.zip`; media WhatsApp has never loaded cannot be fetched, so it is marked missing instead of silently dropped.
-- **The output file is built in the browser** as a `Blob`, saved through an object URL and a local download. Nothing is uploaded; the only copy of the data is the file you receive.
-- **Progress is mirrored into session storage**, which is why closing and reopening the popup does not lose the live status. The content script keeps working as long as the WhatsApp tab is open.
+1. Click the toolbar icon. The popup shows the chat it detected — name, message count and date
+   span.
+2. Pick a format, a date range and how to handle media.
+3. Press **Export chat**.
 
-A longer walkthrough of the modules and message flow is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The popup shows live progress while it scrolls back through the conversation
+(`Loading older messages… 1,240 so far`). **You can close the popup** — the export keeps running
+in the WhatsApp tab, and reopening shows the progress again — but keep the WhatsApp tab itself
+open and in the foreground.
+
+When it finishes you get a summary: filename, message count, file size and any warnings. The file
+is named like `WhatsApp Chat with Alice - 2026-11-18.html`, so a folder of exports stays sortable.
+The last five exports are listed in the popup, and an export never interrupts anything you are
+doing in WhatsApp — it restores your scroll position when it is done.
+
+### How far back does it go?
+
+**As far as WhatsApp has.** With the date range set to *All time* it keeps loading older pages
+until it reaches the first message in the conversation. Pick *Last 30 days* (or a custom range)
+and it stops as soon as the start of that range is covered — which is the fast way to export a
+slice of a very long chat.
+
+Safety stops exist so a runaway loop cannot wedge the tab: 4,000 scroll rounds, a 10-minute
+budget, or 150,000 messages. If one is hit, the export completes and says so in the warnings
+instead of pretending it got everything.
 
 ---
 
-## Options reference
+## Options
 
 | Option | Values | Default | What it does |
 | --- | --- | --- | --- |
-| **Format** | HTML, TXT, JSON, CSV | `HTML` | Output file type. HTML is a styled standalone page; JSON and CSV are for scripts and spreadsheets. |
-| **Date range** | All time, Last 7 days, Last 30 days, Last 90 days, Custom range | `All time` | Limits the export to messages within the range. `All time` scrolls back as far as WhatsApp has messages; any other value stops scrolling once the range is covered. |
-| **Custom range** | start date and end date (`YYYY-MM-DD`) | empty | Used only when **Date range** is *Custom range*. Both ends are inclusive; leave one blank for open-ended. |
-| **Media handling** | None, Placeholders, Download (`.zip`) | `Placeholders` | *None* leaves media out entirely; *Placeholders* records where each item was; *Download* collects capturable files and the report into a single `.zip`. |
-| **Include system messages** | on / off | `off` | Includes joins, leaves, group changes and WhatsApp's notices about encryption and calls. |
-| **Include reactions** | on / off | `on` | Adds emoji reactions (and counts) to the messages they belong to. |
-| **Show sender names** | on / off | `on` | Labels each message with its sender. Turn off for a cleaner one-to-one transcript. |
-| **Max media download** | megabytes | `250` | Safety cap on total media bytes collected in the `.zip`. Once the cap is reached, remaining media is listed as missing rather than downloaded. |
+| **Format** | HTML · Text · JSON · CSV | `HTML` | Output file type. HTML is a standalone styled page; JSON and CSV are for tools. |
+| **Date range** | All time · Last 7 / 30 / 90 days · Custom | `All time` | Limits which messages are exported. *All time* scrolls back to the first message; other ranges stop once covered. |
+| **Custom range** | start and end date | empty | Used when the range is *Custom*. Both ends inclusive; leave one blank for open-ended. |
+| **Media** | None · Placeholders · Download | `Placeholders` | *None* leaves media out; *Placeholders* notes where each item was; *Download* bundles capturable files and the report into one `.zip`. |
+| **Size limit** | 10–2048 MB | `250 MB` | Caps media download. Remaining items are marked missing instead of downloaded. Shown when media is *Download*. |
+| **Include system messages** | on / off | `off` | Joins, leaves, group changes, encryption and call notices. |
+| **Include reactions** | on / off | `on` | Emoji reactions and their counts, attached to the message. |
+| **Show sender names** | on / off | `on` | Labels each message with its author. Turn off for a cleaner one-to-one transcript. |
 
-Settings are saved in `chrome.storage.local`; the last five exports are kept in the history list. Neither ever leaves your browser.
-
----
-
-## FAQ
-
-**Does it work on WhatsApp Desktop?**
-No. It works only inside a Chromium browser on <https://web.whatsapp.com>. The extension needs a normal web page it is allowed to run in; the desktop app is a separate application.
-
-**Does it send my data anywhere?**
-No. It makes zero network requests. There is no account, no server, no analytics and no telemetry. Chat data is read from the open tab, assembled in memory, and written to a local file. See [PRIVACY.md](PRIVACY.md).
-
-**Why are some images missing?**
-WhatsApp Web loads media lazily. An image, video, voice note or document is only available to the extension once WhatsApp has actually rendered it — typically because you scrolled past it and it loaded on screen. Items that were never opened or rendered cannot be downloaded afterwards, so they are exported as "missing" placeholders. There is no way to fetch them after the fact from the browser alone.
-
-**Why did it stop early?**
-WhatsApp Web virtualises the message list: only a window of rows exists in the page at any time, and history is loaded in chunks while scrolling. Very long chats are therefore bounded by how much history WhatsApp is willing to load and how long the export is allowed to scroll. The export stops at the top of the loaded history or at your date cutoff, or when a built-in safety cap (scroll steps or elapsed time) is reached; either way the summary lists what was captured and any warning.
-
-**Does it need my phone?**
-No. It uses the WhatsApp Web session that is already logged in. Your phone is needed only to set up or refresh that WhatsApp Web login, as usual.
-
-**Does it work in other Chromium browsers?**
-Yes — Edge, Brave and Arc support the same unpacked extension flow, with the same steps (use that browser's `…://extensions` page). Firefox and Safari are not supported.
-
-**Is it free?**
-Yes, MIT licensed. Use it, fork it, ship it. See [LICENSE](LICENSE).
-
-**Does it work on group chats?**
-Yes. Sender names are shown per message by default, and system messages can be included. Group-specific details are captured to the extent WhatsApp renders them.
-
----
-
-## Troubleshooting
-
-If an export fails, stops early, or a format looks wrong, start with [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). It explains the diagnostics panel (selectors, matched rows, warnings), what each error code means, and how to work around a WhatsApp Web redesign. The most common cause of "nothing exported" after a WhatsApp update is changed selectors; the diagnostics panel tells you exactly which one broke.
-
----
-
-## Development
-
-The extension is deliberately small: classic scripts on one global `WAEx` namespace, no bundler, no
-runtime dependencies. Reload it from `chrome://extensions` after editing.
-
-```bash
-npm run lint      # static rules: permissions, no network, no innerHTML, manifest contract
-npm test          # all suites
-npm run build     # dist/whatsapp-chat-export-v1.0.0.zip, ready for the Chrome Web Store
-```
-
-Continuous integration runs `lint`, the full test suite on Node 20 and 22, and the packaged build on
-every push and pull request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Tagging
-`vX.Y.Z` publishes a release with the built zip attached
-([`.github/workflows/release.yml`](.github/workflows/release.yml)). The step-by-step release and
-store-submission checklist is in [docs/RELEASING.md](docs/RELEASING.md).
-
-### Repository layout
-
-```text
-whatsapp-chat-export/
-├── .github/
-│   ├── ISSUE_TEMPLATE/
-│   │   ├── bug_report.yml
-│   │   ├── config.yml
-│   │   └── feature_request.yml
-│   ├── workflows/
-│   │   ├── ci.yml
-│   │   └── release.yml
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   └── dependabot.yml
-├── docs/
-│   ├── examples/
-│   │   ├── example-chat.csv
-│   │   ├── example-chat.html
-│   │   ├── example-chat.json
-│   │   └── example-chat.txt
-│   ├── store/
-│   │   ├── marquee-1400x560.png
-│   │   ├── promo-tile-440x280.png
-│   │   ├── screenshot-1-export.png
-│   │   ├── screenshot-2-formats.png
-│   │   ├── screenshot-3-media.png
-│   │   ├── screenshot-4-progress.png
-│   │   └── screenshot-5-privacy.png
-│   ├── ARCHITECTURE.md
-│   ├── PROTOCOL.md
-│   ├── RELEASING.md
-│   ├── STORE.md
-│   └── TROUBLESHOOTING.md
-├── icons/
-│   ├── icon.svg
-│   ├── icon128.png
-│   ├── icon16.png
-│   ├── icon32.png
-│   └── icon48.png
-├── scripts/
-│   ├── build.mjs
-│   └── lint.mjs
-├── src/
-│   ├── background/
-│   │   └── service-worker.js
-│   ├── content/
-│   │   ├── content.js
-│   │   ├── extractor.js
-│   │   └── media.js
-│   ├── lib/
-│   │   ├── datetime.js
-│   │   ├── formats.js
-│   │   ├── namespace.js
-│   │   └── zip.js
-│   └── popup/
-│       ├── popup.css
-│       ├── popup.html
-│       └── popup.js
-├── test/
-│   ├── screenshots/
-│   │   ├── action-cancel.png
-│   │   ├── action-custombad.png
-│   │   ├── action-export-done.png
-│   │   ├── chrome-real-popup.png
-│   │   ├── diag-bottom.png
-│   │   ├── diag-copied.png
-│   │   ├── diag.png
-│   │   ├── done-dark.png
-│   │   ├── done-long.png
-│   │   ├── done.png
-│   │   ├── error-dark.png
-│   │   ├── error.png
-│   │   ├── exporting-dark.png
-│   │   ├── exporting-indeterminate.png
-│   │   ├── exporting-media.png
-│   │   ├── exporting.png
-│   │   ├── loading.png
-│   │   ├── no-chat.png
-│   │   ├── no-tab.png
-│   │   ├── not-ready.png
-│   │   ├── ready-auto-dark.png
-│   │   ├── ready-dark.png
-│   │   ├── ready-download-dark.png
-│   │   ├── ready-download.png
-│   │   ├── ready-full.png
-│   │   ├── ready-long.png
-│   │   └── ready.png
-│   ├── chrome-smoke.mjs
-│   ├── datetime.test.mjs
-│   ├── e2e.test.mjs
-│   ├── extractor.test.mjs
-│   ├── fixture.mjs
-│   ├── formats.test.mjs
-│   ├── harness.mjs
-│   ├── make-examples.mjs
-│   ├── manifest.test.mjs
-│   ├── popup-preview.html
-│   ├── popup-preview.mjs
-│   ├── popup.test.mjs
-│   ├── run.mjs
-│   ├── store-shots.html
-│   ├── store-shots.mjs
-│   └── zip.test.mjs
-├── .editorconfig
-├── .gitignore
-├── .nvmrc
-├── CHANGELOG.md
-├── CODE_OF_CONDUCT.md
-├── CONTRIBUTING.md
-├── LICENSE
-├── PRIVACY.md
-├── README.md
-├── SECURITY.md
-├── manifest.json
-├── package-lock.json
-└── package.json
-```
-
-The tree lists source files. `test/out/` (reports produced by the test suite) and `node_modules/` are generated and intentionally omitted.
-
-### Tests
-
-```bash
-cd whatsapp-chat-export
-npm test
-```
-
-The tests are plain Node scripts (`jsdom` is the only dev dependency) and run in six suites:
-
-| Suite | What it proves |
-| --- | --- |
-| `datetime.test.mjs` | Every timestamp/locale format WhatsApp can render, day/month order inference, date ranges. |
-| `formats.test.mjs` | The four writers: HTML escaping, CSV quoting and BOM, JSON schema, TXT layout, filenames. |
-| `zip.test.mjs` | The hand-written ZIP container: CRC-32 vectors, deflate, unicode names, path-traversal safety. Validated by Python's `zipfile`. |
-| `extractor.test.mjs` | The scraper against a simulated WhatsApp DOM: chat header, quotes, reactions, media, system notices, scroll-to-load, cancellation, date-range cut-off, virtualisation recovery, diagnostics. |
-| `e2e.test.mjs` | The real content script end to end: exports HTML+media (ZIP contents opened and checked), CSV, JSON with a date range, and the failure paths. |
-| `popup.test.mjs` | The real popup page wired to the real content script: boot, settings persistence, a full export triggered by clicking the button, history, degraded states. |
-| `manifest.test.mjs` | Packaging: MV3 fields, minimal permissions, every referenced file exists, icon dimensions, no inline script or `eval`. |
-
-`npm test` runs all of them and fails if any check fails. `npm run screenshots` regenerates the popup screenshots in `test/screenshots/` from `test/popup-preview.html`.
-
-There is also an optional real-browser check. It loads the unpacked extension into headless Chrome through the DevTools `Extensions` domain, confirms the MV3 service worker starts, opens the popup as a real extension page (watching for CSP violations), and injects the content script into a live `web.whatsapp.com` page:
-
-```bash
-npm run smoke:chrome
-```
-
-It needs a locally installed Chrome (`CHROME_BIN` to override the binary) and skips the live-WhatsApp assertions when there is no network. Nothing about it is required to build or run the extension.
-
-### Icons
-
-`icons/icon.svg` is the vector source: a rounded green tile (`#25D366` → `#00A884`) with a white speech bubble and a download arrow. The PNGs are rendered at 4× and downsampled with Lanczos for clean edges; the 16 px and 32 px variants use a slightly larger bubble and a thicker arrow so the shape still reads at toolbar size.
-
-To regenerate with Inkscape or librsvg plus ImageMagick:
-
-```bash
-# render the vector large, then downsample to the four required sizes
-rsvg-convert -w 512 -h 512 icons/icon.svg -o /tmp/wax-icon-512.png
-for size in 16 32 48 128; do
-  magick /tmp/wax-icon-512.png -filter Lanczos -resize "${size}x${size}" "icons/icon${size}.png"
-done
-```
-
-Check `icon16.png` by eye afterwards; the arrow should remain a distinct downward shape, not a blob. The PNGs must be exactly 16×16, 32×32, 48×48 and 128×128.
-
-### Coding rules
-
-These come from [docs/PROTOCOL.md](docs/PROTOCOL.md), which is the contract between the popup, the content script and the service worker:
-
-- **Classic scripts only.** No ES modules; every library file is an IIFE that attaches to the global `WAEx` namespace. `src/lib/namespace.js` is the source of truth for constants, defaults and file load order.
-- **No network requests.** `fetch` may only read `blob:`/`data:` URLs that already exist in the page (that is how media is captured). Never call a remote URL, and never add analytics, telemetry or remote code. Chat data must stay in the tab and in the downloaded file.
-- **No `innerHTML` with user content.** Message text is always inserted via `textContent` or DOM nodes, never interpolated into HTML strings.
-- **Minimal permissions.** `storage`, `scripting`, `activeTab`, plus host access to `https://web.whatsapp.com/*`. Do not widen them.
-- **Fail soft.** Every selector gets a fallback chain; a missing element becomes a warning, not an exception that kills the export.
-- **The popup may close at any time.** Essential state lives in the content script and `chrome.storage.session`, never only in the popup.
-
-Project documents:
-
-| Document | Contents |
-| --- | --- |
-| [docs/PROTOCOL.md](docs/PROTOCOL.md) | Message protocol, settings shape, data types, the rules the code must follow |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the three contexts fit together, selector strategy, failure modes |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Selector breakage, missing media, cancelled exports |
-| [docs/RELEASING.md](docs/RELEASING.md) | Versioning, release checklist, Chrome Web Store submission |
-| [docs/STORE.md](docs/STORE.md) | Store listing copy, permission justifications, graphics |
-
-The extension's artwork (icons) is in [icons/](icons/), the store screenshots and promo tiles are in
-[docs/store/](docs/store/), and sample exports for each format are in [docs/examples/](docs/examples/).
-
----
-
-## Contributing, security and support
-
-- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, the five ground rules, what is
-  most useful to send in a pull request, and the test layout.
-- **Questions and ideas:** [GitHub Discussions](https://github.com/CaullenOmdahl/whatsapp-chat-export/discussions).
-- **Bugs:** use the issue form; include the popup's **Diagnostics** report, which contains selector
-  match counts but no message content.
-- **Security:** please report privately — see [SECURITY.md](SECURITY.md). Do not open a public issue
-  for a vulnerability.
-- **Code of conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-
-> **Not affiliated with, endorsed by, or sponsored by WhatsApp LLC or Meta.** "WhatsApp" is used only
-> to describe compatibility with WhatsApp Web. The extension only reads the conversation you have
-> open; it never automates WhatsApp actions.
+Settings are remembered in `chrome.storage.local`. Nothing is synced anywhere.
 
 ---
 
 ## Privacy
 
-Short version: **nothing is collected, nothing is transmitted, and chat data never leaves your browser.** The extension stores your option settings and a five-entry export history in `chrome.storage.local`; exports run entirely in the WhatsApp tab. Read the full policy in [PRIVACY.md](PRIVACY.md).
+**The extension has no network code.** Not "we promise not to"; there is no `fetch` for anything
+except `blob:`/`data:` URLs that already exist inside the WhatsApp page (that is how media is
+captured), and a test fails the build if that changes. No analytics, no error reporting, no remote
+config, no remote code.
+
+| Permission | Why it is needed |
+| --- | --- |
+| `storage` | Remember your options and the list of recent exports. |
+| `scripting` | Re-inject the content script if the popup opens before the page finished loading. |
+| `activeTab` | Talk to the WhatsApp tab you are looking at, only after you click. |
+| `https://web.whatsapp.com/*` | Read the conversation panel. That is the entire surface area. |
+
+**What it never does:** send messages, read your chats in the background, touch other sites, run on
+startup, phone home, or store your message content anywhere except the file you download.
+
+The full policy is in [PRIVACY.md](PRIVACY.md). A message body is never written into the document
+as HTML unescaped — everything from the page is treated as untrusted text, which is enforced by the
+test suite.
+
+---
+
+## How it works
+
+- **A content script runs inside the WhatsApp Web tab**, only on `https://web.whatsapp.com/*`, and
+  only after you ask it to. It reads the already-rendered page; it has no network access.
+- **The conversation is scraped structurally, not by class name.** WhatsApp rotates obfuscated
+  class names constantly, so the scraper keys off stable facts: `#main`, `div[data-id]` message
+  ids, the `data-pre-plain-text` timestamp/author attribute, and `.selectable-text` bodies. Every
+  lookup has a fallback chain, and a miss becomes a warning rather than a failed export.
+- **History is loaded page by page.** It scrolls to the top to make WhatsApp fetch older messages,
+  waits for the page to render, and parses only what it has not seen yet. When a jump stops
+  producing pages it switches to viewport-sized scroll steps before concluding the chat is fully
+  loaded. Messages are kept as they are seen, so ones WhatsApp removes from the DOM mid-scroll
+  still reach the file.
+- **Timestamps are parsed per locale.** WhatsApp renders dates differently in every language, and
+  the day/month order is inferred from the conversation itself, not assumed.
+- **Everything is normalised into one message model** (author, direction, type, text, quote,
+  reactions, media), so all four formats come from a single parse.
+- **Files are built in the browser** as a `Blob` and saved through an object URL. The ZIP container
+  is written by hand — no dependencies, and CRCs are validated in the tests.
+
+More detail, including the selector strategy and failure modes, is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The popup ↔ content-script contract is in
+[docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+---
+
+## FAQ
+
+<details>
+<summary><b>Do I need my phone?</b></summary>
+
+No. If WhatsApp Web is logged in, the extension works. It uses the session that is already open.
+</details>
+
+<details>
+<summary><b>Does it work on WhatsApp Desktop, or with my whole chat list at once?</b></summary>
+
+No and not yet. It exports the conversation currently open in the WhatsApp Web tab. A batch
+"export everything" mode is the most requested idea — see the issue tracker.
+</details>
+
+<details>
+<summary><b>Where do the files go?</b></summary>
+
+Your browser's normal Downloads folder. Nothing is uploaded anywhere.
+</details>
+
+<details>
+<summary><b>Why are some photos missing from the archive?</b></summary>
+
+WhatsApp only keeps a downloadable copy of media that has been rendered on screen. A photo you
+have never scrolled past has no bytes in the page, so it cannot be captured. It is exported as a
+placeholder marked *not loaded in WhatsApp*. Scroll through the chat once before exporting if you
+need those files.
+</details>
+
+<details>
+<summary><b>Why did a very long chat stop before the beginning?</b></summary>
+
+Either the safety cap was reached (the result panel says which), or WhatsApp stopped serving older
+pages. Use a date range to export it in slices — that is faster and bounded. Details in
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+</details>
+
+<details>
+<summary><b>Does it work in Edge, Brave, Arc or Chromium?</b></summary>
+
+Yes. It is a standard Manifest V3 extension; the unpacked install steps are identical.
+</details>
+
+<details>
+<summary><b>Can it export a chat I am not part of?</b></summary>
+
+No. It reads only the conversation open in your logged-in session — the same thing you can
+already see on screen.
+</details>
+
+<details>
+<summary><b>Is it affiliated with WhatsApp or Meta?</b></summary>
+
+No. It is an independent open-source tool, MIT licensed, and not endorsed by or connected to
+WhatsApp LLC or Meta. "WhatsApp" is used only to say what it is compatible with.
+</details>
+
+---
+
+## Troubleshooting
+
+If something looks wrong, the popup's **Diagnostics** panel lists every page selector it relies on,
+how many elements matched, the rendered message count, whether the scroll container was found and
+any warnings — with a one-click **Copy report**. That turns "it broke" into a useful bug report.
+
+Start with [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). The usual suspects: WhatsApp is still
+loading, the chat is not open, or WhatsApp shipped a markup change that needs a selector update.
+
+---
+
+## Development
+
+No bundler, no framework, no runtime dependencies: classic scripts on one `WAEx` namespace, plus
+`jsdom` for tests.
+
+```bash
+npm ci                # install the one dev dependency
+npm test              # 7 suites
+npm run lint          # permissions, no-network, no-innerHTML, manifest contract, version sync
+npm run build         # dist/whatsapp-chat-export-v1.0.1.zip, ready for the Web Store
+```
+
+| Script | What it does |
+| --- | --- |
+| `npm run test:<suite>` | Run one suite (`manifest`, `datetime`, `formats`, `zip`, `extractor`, `e2e`, `popup`) |
+| `npm run screenshots` | Regenerate the 26 popup screenshots in `test/screenshots/` |
+| `npm run store-shots` | Regenerate the 1280×800 Web Store artwork in `docs/store/` |
+| `npm run examples` | Regenerate the sample exports in `docs/examples/` |
+| `npm run smoke:chrome` | Load the unpacked extension in real headless Chrome and check it boots |
+
+**What the tests cover:** locale-tolerant date parsing, all four writers (including HTML escaping
+and CSV quoting), the hand-written ZIP container (validated with Python's `zipfile`), the scraper
+against a simulated WhatsApp DOM, an end-to-end export whose downloaded file is opened and checked,
+the real popup wired to the real content script, and the manifest/packaging rules. CI runs the
+suite on Node 22 and 24, builds the store zip, and tags publish a release automatically.
+
+Contributor docs: [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
+[docs/PROTOCOL.md](docs/PROTOCOL.md) · [docs/RELEASING.md](docs/RELEASING.md) ·
+[docs/STORE.md](docs/STORE.md).
+
+---
+
+## Contributing, security and support
+
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, the ground rules (no network,
+  no new permissions, no `innerHTML` with user content), and what is most useful in a pull request.
+- **Questions and ideas:** [GitHub Discussions](https://github.com/CaullenOmdahl/whatsapp-chat-export/discussions).
+- **Bugs:** use the issue form and paste the Diagnostics report — it contains selector match counts,
+  no message content.
+- **Security:** report privately via [SECURITY.md](SECURITY.md). Please do not open a public issue
+  for a vulnerability.
+- **Code of conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+The most valuable bug report is a **broken selector** after a WhatsApp update: include the
+Diagnostics report and, if you can, a snippet of the new markup with message content redacted.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Copyright 2026 Chat Export for WhatsApp contributors.
+[MIT](LICENSE) © 2026 Chat Export for WhatsApp contributors. Use it, fork it, ship it, learn from it.
 
-**Disclaimer:** Chat Export for WhatsApp is an independent project. It is not affiliated with, endorsed by, or sponsored by WhatsApp LLC or Meta. "WhatsApp" is a trademark of Meta Platforms, Inc., used here only to describe compatibility with WhatsApp Web. Use it only on conversations you have the right to export, and respect the privacy of the people in them.
+> **Trademark note.** Chat Export for WhatsApp is not affiliated with, endorsed by, or sponsored by
+> WhatsApp LLC or Meta. "WhatsApp" is a trademark of Meta Platforms, Inc. and is used only to
+> describe compatibility with WhatsApp Web. The extension only reads the conversation you have open
+> and never automates WhatsApp actions.
