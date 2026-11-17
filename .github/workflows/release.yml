@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to commit SHAs; see SECURITY.md.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Verify tag matches the manifest version
+        run: node scripts/build.mjs --verify-tag "$GITHUB_REF_NAME"
+      - name: Static checks and tests
+        run: |
+          npm run lint
+          npm test
+      - name: Build uploadable zip
+        run: npm run build
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.zip \
+            --title "Chat Export for WhatsApp $GITHUB_REF_NAME" \
+            --generate-notes \
+            --notes "Install: download the \`.zip\` below, unpack it, then load it at \`chrome://extensions\` → Developer mode → Load unpacked. Chrome Web Store listing: see the README. Not affiliated with WhatsApp LLC or Meta."

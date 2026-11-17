@@ -1,0 +1,229 @@
+{
+  "schema": "chat-export/v1",
+  "generator": "Chat Export for WhatsApp 1.0.0",
+  "exportedAt": "2026-11-18T02:30:00.000Z",
+  "chat": {
+    "name": "Design Team",
+    "isGroup": true
+  },
+  "settings": {
+    "format": "json",
+    "mediaMode": "link",
+    "includeSystem": false,
+    "includeReactions": true,
+    "dateRange": "all"
+  },
+  "stats": {
+    "total": 10,
+    "incoming": 6,
+    "outgoing": 4,
+    "byType": {
+      "text": 6,
+      "image": 1,
+      "document": 1,
+      "voice": 1,
+      "deleted": 1
+    },
+    "participants": [
+      {
+        "name": "Bob",
+        "count": 5
+      },
+      {
+        "name": "You",
+        "count": 4
+      },
+      {
+        "name": "Alice",
+        "count": 1
+      }
+    ],
+    "dateRange": {
+      "start": "2023-11-12T02:15:00.000Z",
+      "end": "2023-12-25T11:02:00.000Z"
+    },
+    "days": [
+      {
+        "date": "2023-11-12",
+        "label": "12 Nov 2023",
+        "count": 7
+      },
+      {
+        "date": "2023-12-25",
+        "label": "25 Dec 2023",
+        "count": 3
+      }
+    ]
+  },
+  "messages": [
+    {
+      "id": "false_120363000000000000@g.us_AAA1",
+      "timestamp": 1699755300000,
+      "timestampISO": "2023-11-12T02:15:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:15:00",
+      "author": "Alice",
+      "direction": "incoming",
+      "type": "text",
+      "text": "Yes! Let's do 10am",
+      "quoted": {
+        "author": "Bob",
+        "text": "Are we still on for Friday?"
+      },
+      "reactions": [],
+      "media": null
+    },
+    {
+      "id": "false_120363000000000000@g.us_AAA2",
+      "timestamp": 1699755360000,
+      "timestampISO": "2023-11-12T02:16:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:16:00",
+      "author": "Bob",
+      "direction": "incoming",
+      "type": "text",
+      "text": "Perfect.\nI'll bring coffee ☕",
+      "quoted": null,
+      "reactions": [],
+      "media": null
+    },
+    {
+      "id": "true_120363000000000000@g.us_AAA3",
+      "timestamp": 1699755600000,
+      "timestampISO": "2023-11-12T02:20:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:20:00",
+      "author": "You",
+      "direction": "outgoing",
+      "type": "text",
+      "text": "Great 👍",
+      "quoted": null,
+      "reactions": [],
+      "media": null
+    },
+    {
+      "id": "false_120363000000000000@g.us_AAA4",
+      "timestamp": 1699755660000,
+      "timestampISO": "2023-11-12T02:21:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:21:00",
+      "author": "Bob",
+      "direction": "incoming",
+      "type": "image",
+      "text": "Here's the deck",
+      "quoted": null,
+      "reactions": [
+        {
+          "emoji": "👍",
+          "count": 2
+        }
+      ],
+      "media": {
+        "kind": "image",
+        "fileName": "",
+        "mime": "image/jpeg",
+        "bytes": 0,
+        "file": "media/0001-image.jpg",
+        "missing": false
+      }
+    },
+    {
+      "id": "true_120363000000000000@g.us_AAA5",
+      "timestamp": 1699755720000,
+      "timestampISO": "2023-11-12T02:22:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:22:00",
+      "author": "You",
+      "direction": "outgoing",
+      "type": "text",
+      "text": "https://example.com/deck",
+      "quoted": null,
+      "reactions": [],
+      "media": null
+    },
+    {
+      "id": "true_120363000000000000@g.us_AAA6",
+      "timestamp": 1699756200000,
+      "timestampISO": "2023-11-12T02:30:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:30:00",
+      "author": "You",
+      "direction": "outgoing",
+      "type": "document",
+      "text": "",
+      "quoted": null,
+      "reactions": [],
+      "media": {
+        "kind": "document",
+        "fileName": "Q4-plan.pdf",
+        "mime": "",
+        "bytes": 0,
+        "file": "",
+        "missing": true
+      }
+    },
+    {
+      "id": "false_120363000000000000@g.us_AAA7",
+      "timestamp": 1699756260000,
+      "timestampISO": "2023-11-12T02:31:00.000Z",
+      "date": "2023-11-12",
+      "time": "09:31:00",
+      "author": "Bob",
+      "direction": "incoming",
+      "type": "voice",
+      "text": "",
+      "quoted": null,
+      "reactions": [],
+      "media": {
+        "kind": "voice",
+        "fileName": "",
+        "mime": "audio/ogg",
+        "bytes": 0,
+        "file": "",
+        "missing": true
+      }
+    },
+    {
+      "id": "true_120363000000000000@g.us_BBB1",
+      "timestamp": 1703502000000,
+      "timestampISO": "2023-12-25T11:00:00.000Z",
+      "date": "2023-12-25",
+      "time": "18:00:00",
+      "author": "You",
+      "direction": "outgoing",
+      "type": "text",
+      "text": "Merry Christmas! 🎄",
+      "quoted": null,
+      "reactions": [],
+      "media": null
+    },
+    {
+      "id": "false_120363000000000000@g.us_BBB2",
+      "timestamp": 1703502060000,
+      "timestampISO": "2023-12-25T11:01:00.000Z",
+      "date": "2023-12-25",
+      "time": "18:01:00",
+      "author": "Bob",
+      "direction": "incoming",
+      "type": "deleted",
+      "text": "This message was deleted",
+      "quoted": null,
+      "reactions": [],
+      "media": null
+    },
+    {
+      "id": "false_120363000000000000@g.us_BBB3",
+      "timestamp": 1703502120000,
+      "timestampISO": "2023-12-25T11:02:00.000Z",
+      "date": "2023-12-25",
+      "time": "18:02:00",
+      "author": "Bob",
+      "direction": "incoming",
+      "type": "text",
+      "text": "See you in January.\n\nHappy holidays!",
+      "quoted": null,
+      "reactions": [],
+      "media": null
+    }
+  ]
+}

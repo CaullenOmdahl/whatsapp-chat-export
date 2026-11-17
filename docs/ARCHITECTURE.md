@@ -1,0 +1,237 @@
+# Architecture — Chat Export for WhatsApp
+
+This document explains how the extension works end to end, for contributors and for anyone
+auditing what it does with their data. The authoritative technical contract is
+[PROTOCOL.md](PROTOCOL.md); this file is the narrative version.
+
+## Design constraints
+
+1. **Local only.** No network requests, no remote code, no account. Chat content is read from the
+   page, assembled in memory and written to a local file.
+2. **Fail soft.** WhatsApp Web is a moving target. A selector that stops matching must produce a
+   warning and a degraded export, never an exception that loses the whole run.
+3. **No build step.** Classic scripts on a single `WAEx` global, loaded in dependency order by
+   `manifest.json`. The popup loads the same libraries with plain `<script>` tags. This keeps the
+   unpacked folder directly loadable and easy to audit.
+4. **The popup is disposable.** The popup can be closed at any moment; the export lives in the
+   WhatsApp tab and mirrors its progress to session storage.
+5. **Minimal permissions.** `storage`, `scripting`, `activeTab`, and `https://web.whatsapp.com/*`.
+
+## The three contexts
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│ TOOLBAR CLICK                                                                       │
+│   Chrome opens the popup ──chrome.tabs.sendMessage──▶ content script                │
+│   service worker (install/startup only): seeds storage, session access              │
+│                                                                                     │
+│ WHATSAPP WEB TAB (https://web.whatsapp.com)                                         │
+│   WhatsApp page DOM                    content script (isolated world, WAEx)        │
+│   ├─ #main conversation panel   ─────▶ extractor                                    │
+│   ├─ div[data-id] message rows  ─────▶   │ parse · filter · dedupe                  │
+│   └─ scroll container           ◀──────  │ scroll up to load history                │
+│                                          ▼                                          │
+│                                     format writers ──▶ Blob ──▶ object URL ──▶ file │
+│                                          │                                          │
+│                                          └──▶ chrome.storage.session (progress)     │
+│                                                    │                                │
+│   popup (reopened) ◀────────────────────────────────┘ restores live progress        │
+│                                                                                     │
+│ chrome.storage.local: settings + last 5 exports      ~/Downloads/report.*           │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Context | Entry point | Responsibility |
+| --- | --- | --- |
+| **Service worker** | `src/background/service-worker.js` | Runs in the background: seeds default settings and an empty history on install/startup, grants content scripts read access to session storage, and prunes stale export state. It never sees chat data. |
+| **Popup** | `src/popup/popup.html` + `popup.js` | Settings UI, status/progress display, history list, diagnostics panel. Sends commands to the content script. It never scrapes the page itself. |
+| **Content script** | `src/content/content.js` (with `extractor.js`, `media.js`) | Runs inside `web.whatsapp.com`. Scrapes the open conversation, builds the file, triggers the download, reports progress. |
+
+`src/lib/*` is shared: `namespace.js` (constants, defaults), `datetime.js` (timestamp parsing),
+`zip.js` (a small dependency-free ZIP writer), `formats.js` (HTML/TXT/JSON/CSV serialisers).
+
+## Export flow
+
+1. **The user opens the popup on a WhatsApp Web tab.** The popup asks the content script for a
+   health check (`WAX:PING`). The reply includes the detected chat name, whether a chat is open,
+   the number of currently rendered message rows and any in-flight export state.
+2. **The user picks settings and clicks Export chat.** The popup normalises the settings against
+   `WAEx.DEFAULT_SETTINGS`, saves them to `chrome.storage.local`, and sends `WAX:EXPORT`.
+3. **The content script acknowledges immediately** and begins the scroll phase. Progress arrives
+   in the popup as `WAX:PROGRESS` broadcasts, and is mirrored to `chrome.storage.session` under
+   `wax:state`.
+4. **Scroll phase.** The extractor repeatedly jumps the message-list container to the top, waits
+   for the scroll to settle, and records newly seen message rows keyed by `data-id`. WhatsApp then
+   loads the previous chunk of history. It stops when:
+   - it reaches the top of the loaded history (three consecutive scroll rounds with no new rows),
+   - the oldest message seen is older than the selected date cutoff,
+   - a safety cap is hit (**600** scroll rounds or a **240 s** time budget in version 1.0.0), which
+     produces a warning, or
+   - the user presses Cancel.
+5. **Parse phase.** For each collected row the extractor reads the message text and metadata,
+   determines the message type, parses the timestamp, picks up sender name, quoted message and
+   reactions, resolves media descriptors, and then applies the options: system-message filter,
+   date-range filter and reaction handling.
+6. **Media phase** (only when media handling is *Download*). Each capturable media item is fetched
+   from the page's already-loaded `blob:`/`data:` URL (never the network) and added to the in-memory
+   ZIP under `media/`, subject to the media cap. Items that cannot be fetched are flagged `missing`.
+7. **Build and save.** The format writer serialises the message array. For HTML, captured media is
+   referenced by its `media/…` path inside the archive. The content script creates a `Blob`, fires a
+   local download via an anchor and object URL, and sends `WAX:RESULT` with the filename, byte size,
+   message count and warnings. When at least one media file was captured, the report is added to the
+   ZIP as well, and the single resulting archive is the download. The popup adds an entry to the
+   five-item history.
+8. **Cleanup.** The temporary object URL is revoked, the chat's original scroll position is
+   restored, and the export state is settled. Cancelling or failing ends the same way, with an
+   error/result record instead of a file.
+
+## Scraping strategy
+
+WhatsApp Web is a React app with generated class names, so the extension deliberately avoids
+depending on hashed classes. It looks for **stable structural hooks**, in a fallback chain per
+element:
+
+| Target | Primary hook | Fallbacks |
+| --- | --- | --- |
+| Conversation panel | `#main` | `[data-testid="conversation-panel-wrapper"]`, `div[role="main"]`, a structural `#app` path |
+| Message rows | `div[role="row"]` | message nodes carrying `data-id` |
+| Message nodes | `div[data-id]` (the stable per-message id) | nested `[data-id]` inside a row |
+| Chat title | `header [data-testid="conversation-info-header-chat-title"]` | `header span[dir="auto"][title]`, `header span[title]`, `header h1` |
+| Message text | `.selectable-text` | `.copyable-text`, then whole-row text |
+| Timestamp + author | `data-pre-plain-text` on the row | `<time>`/`title` attributes, then metadata text |
+| Quoted reply | `[data-testid="quoted-message"]` | `.quoted-mention`, localized `aria-label` matches |
+| Reactions | reaction chips inside the bubble | accessible labels |
+| Media | `img`, `video`, `audio`, anchors with `blob:`/`data:` URLs | preview elements with type hints |
+
+The conversation's scroll container is not selected by a fixed selector at all: it is found as the
+nearest scrollable ancestor of a message row, with a fallback search for the deepest scrollable
+element inside the panel. That survives most sidebar/list markup changes.
+
+When a selector matches nothing, the lookup records a warning and tries the next candidate. The
+diagnostics report (`WAX:DIAGNOSE`) exposes, for every named selector, the CSS selector text and
+the number of matches, plus counts for the panel, list, scroll container, rendered rows and parsed
+messages. That is the early-warning system for a WhatsApp redesign: a single selector dropping to
+zero matches, or `renderedRows > 0` with `parsedMessages == 0`, points straight at the broken step.
+
+### Why `data-id`
+
+Each rendered message carries a `data-id` that is unique and stable for that message. Rows are
+recycled as you scroll (virtualised list), so the extractor keeps a map keyed by `data-id` and
+merges new partial observations into existing records. This avoids duplicates and lets the scroll
+loop detect that it has stopped discovering anything new.
+
+### Timestamps
+
+`data-pre-plain-text` is the most reliable source because it contains the formatted date and time
+of the message (and, in groups, the sender). `datetime.js` parses the common locale formats and
+falls back to the row's `<time>`/`title` attributes and then to the current day. Timestamps are
+stored as epoch milliseconds plus a `YYYY-MM-DD` date key. If a timestamp cannot be recovered, the
+message is kept with a best-effort value and a warning; it is never dropped silently.
+
+## Data model
+
+Every format is generated from the same `Message[]` array (see the TypeScript shapes in
+[PROTOCOL.md](PROTOCOL.md)):
+
+- `id`, `timestamp`, `dateKey`, `timeText`
+- `author`, `isOutgoing`
+- `type` — text, image, video, audio, voice, document, sticker, gif, contact, location, poll,
+  link, deleted, system, unknown
+- `text`, `quoted`, `reactions`, `media` (`{ kind, fileName, mime, bytes, missing, zipPath }`)
+
+Format writers are pure functions from that array to a string. This keeps the formats consistent
+and unit-testable without a browser.
+
+## Media handling
+
+WhatsApp Web loads media lazily. The extension can only capture what the page has already turned
+into a blob/data URL. In **Download** mode the media phase:
+
+1. walks the collected rows and looks for media elements or URLs,
+2. fetches each URL via the page context (local, no network request to WhatsApp servers),
+3. derives a file name and MIME type, adds the bytes to the ZIP under `media/`,
+4. records `zipPath` for the report, or `missing: true` when the URL is unavailable,
+5. stops downloading once `maxMediaMb` is reached, marking the remainder as missing.
+
+Some items — a photo you never scrolled past, a video thumbnail without a loaded source, a
+document whose link was not resolved — cannot be fetched. They are exported as explicit "missing"
+placeholders. The extension does not guess or reconstruct them.
+
+The ZIP writer (`src/lib/zip.js`) is dependency-free and uses the STORE method for media (which is
+already compressed) and DEFLATE for the report text when the browser exposes `CompressionStream`.
+Because the report references media by relative `media/…` paths, it is placed inside the archive
+at the root: the archive is the single download, named after the chat and date. If no media was
+captured, the report is downloaded on its own instead.
+
+## Storage
+
+| Key | Area | Contents |
+| --- | --- | --- |
+| `wax:settings` | `chrome.storage.local` | The normalised settings object (format, date range, media mode, toggles, cap). |
+| `wax:history` | `chrome.storage.local` | Last five export summaries: chat name, format, timestamp, message count, byte size, filename. |
+| `wax:state` | `chrome.storage.session` | Live/most-recent export state: phase, loaded, total, detail, percent, timestamps, result or error. |
+
+Session storage is what makes "close the popup, reopen it, progress is still there" work. It is
+in-memory and dies with the browser session. Local storage holds only settings and small history
+metadata — never message content.
+
+## Security and privacy properties
+
+- **No network requests.** The only `fetch` calls operate on `blob:`/`data:` URLs that WhatsApp
+  Web has already created in the page; no `XMLHttpRequest`, no `WebSocket`, no remote script, no
+  analytics. This is a code-review invariant, not just a policy.
+- **User content never touches `innerHTML`.** Format writers escape text (`&`, `<`, `>`, quotes,
+  newlines as appropriate) and the HTML writer emits markup around escaped text; DOM APIs use
+  `textContent`. This blocks a message containing HTML from executing in the exported report or the
+  extension's own UI.
+- **CSV is UTF-8 with a BOM** and RFC 4180 quoting, so Excel and Sheets open it correctly.
+- **Least privilege.** Only the four declared permissions; the content script only matches
+  `https://web.whatsapp.com/*`.
+- **No remote code.** Everything is packaged; the extension works offline (after WhatsApp itself
+  has loaded).
+
+## Failure modes
+
+| Failure | Behaviour |
+| --- | --- |
+| No WhatsApp tab / no chat open | Popup shows a clear prompt; no export starts (`NO_CONVERSATION`). |
+| No messages matched the filters | Export ends with `NO_MESSAGES` and suggests widening the date range or loading more history. |
+| An export is already running | Second request is refused with `ALREADY_RUNNING`; the popup keeps showing the live one. |
+| Selector no longer matches | Warning recorded, fallback tried; export continues with whatever is available. |
+| Media URL unavailable | Item marked missing; count surfaced in the summary. |
+| Media cap reached | Remaining items marked missing; warning explains the cap. |
+| User cancels | Scroll/parse/media loops stop at the next checkpoint; state becomes `cancelled`. |
+| Popup closed mid-export | Content script continues; state mirrored to session storage; reopened popup restores it. |
+| WhatsApp tab closed/reloaded | Content script is torn down; the export stops with `PAGE_RELOADED` and the popup reports the break. |
+
+## Testing approach
+
+The repo's `test/` suite runs on Node and targets the library code and the content pipeline,
+where the interesting logic lives:
+
+- `datetime.js` — timestamp parsing across formats and fallbacks.
+- `namespace.js` — settings normalisation/defaults (exercised indirectly by the other suites).
+- `formats.js` — each writer's shape, escaping and CSV quoting.
+- `zip.js` — ZIP structure, local headers, central directory and CRC.
+- `extractor.js` — the scraper run against a `jsdom` fixture that imitates WhatsApp's DOM:
+  message rows, `data-id`, `data-pre-plain-text`, scrolling and date filtering.
+- `content.js` end to end — the full content script against the fixture, with the generated
+  download captured and validated on disk.
+
+`test/fixture.mjs` builds the simulated conversation and day dividers; `test/harness.mjs` provides
+the fake `chrome.*` surface, script loader and download capture. Live WhatsApp Web is still the
+final acceptance check for selector health, with the diagnostics panel as the fast signal. There is
+no browser automation dependency and no network in tests.
+
+## Extending safely
+
+When WhatsApp changes its DOM:
+
+1. Run the diagnostics panel and note which selector has zero matches.
+2. Add a new candidate to the front of that selector's fallback chain in the extractor rather than
+   editing the old entry; keep old hooks for users on older WhatsApp builds.
+3. Add or update a diagnostics selector entry so the next break is visible.
+4. Bump the version and add a [CHANGELOG](../CHANGELOG.md) entry.
+
+Never add a network call, never interpolate message text into an HTML string, and never move
+essential state into the popup. Those three rules are the whole security and reliability model.

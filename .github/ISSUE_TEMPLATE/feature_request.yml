@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest an improvement or a new capability
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please keep in mind the project's constraints: no network requests, no new
+        permissions, no remote code, and everything must work from the DOM WhatsApp Web
+        already renders. See [CONTRIBUTING.md](https://github.com/CaullenOmdahl/whatsapp-chat-export/blob/main/CONTRIBUTING.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      placeholder: I archive chats for a research project and need one file per day.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Export formats
+        - Media handling
+        - Date ranges / filtering
+        - Popup UX
+        - Performance on long chats
+        - Accessibility
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Does this fit the project constraints?
+      options:
+        - label: It needs no network access and no additional permissions
+          required: false

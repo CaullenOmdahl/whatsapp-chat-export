@@ -1,0 +1,14 @@
+﻿timestamp_iso,timestamp_ms,date,time,author,direction,type,text,quoted_author,quoted_text,reactions,media_kind,media_file,media_missing,message_id
+2023-11-12T02:15:00.000Z,1699755300000,2023-11-12,09:15:00,Alice,incoming,text,Yes! Let's do 10am,Bob,Are we still on for Friday?,,,,,false_120363000000000000@g.us_AAA1
+2023-11-12T02:16:00.000Z,1699755360000,2023-11-12,09:16:00,Bob,incoming,text,"Perfect.
+I'll bring coffee ☕",,,,,,,false_120363000000000000@g.us_AAA2
+2023-11-12T02:20:00.000Z,1699755600000,2023-11-12,09:20:00,You,outgoing,text,Great 👍,,,,,,,true_120363000000000000@g.us_AAA3
+2023-11-12T02:21:00.000Z,1699755660000,2023-11-12,09:21:00,Bob,incoming,image,Here's the deck,,,👍 2,image,media/0001-image.jpg,,false_120363000000000000@g.us_AAA4
+2023-11-12T02:22:00.000Z,1699755720000,2023-11-12,09:22:00,You,outgoing,text,https://example.com/deck,,,,,,,true_120363000000000000@g.us_AAA5
+2023-11-12T02:30:00.000Z,1699756200000,2023-11-12,09:30:00,You,outgoing,document,,,,,document,,true,true_120363000000000000@g.us_AAA6
+2023-11-12T02:31:00.000Z,1699756260000,2023-11-12,09:31:00,Bob,incoming,voice,,,,,voice,,true,false_120363000000000000@g.us_AAA7
+2023-12-25T11:00:00.000Z,1703502000000,2023-12-25,18:00:00,You,outgoing,text,Merry Christmas! 🎄,,,,,,,true_120363000000000000@g.us_BBB1
+2023-12-25T11:01:00.000Z,1703502060000,2023-12-25,18:01:00,Bob,incoming,deleted,This message was deleted,,,,,,,false_120363000000000000@g.us_BBB2
+2023-12-25T11:02:00.000Z,1703502120000,2023-12-25,18:02:00,Bob,incoming,text,"See you in January.
+
+Happy holidays!",,,,,,,false_120363000000000000@g.us_BBB3

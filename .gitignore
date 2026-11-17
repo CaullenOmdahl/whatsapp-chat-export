@@ -1,0 +1,7 @@
+node_modules/
+test/out/
+test/screenshots/*.tmp.png
+.DS_Store
+*.zip
+*.crdownload
+dist/

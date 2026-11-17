@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in the extension does not work as documented
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before filing, please check
+        [docs/TROUBLESHOOTING.md](https://github.com/CaullenOmdahl/whatsapp-chat-export/blob/main/docs/TROUBLESHOOTING.md)
+        — the diagnostics panel usually identifies the cause.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+      placeholder: I clicked Export chat and got "No messages matched this export".
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open web.whatsapp.com and a chat
+        2. Choose HTML + All time
+        3. Click Export chat
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: |
+        In the popup, open **Diagnostics** and click **Copy report**. Paste it here.
+        It contains selector match counts and the browser user agent — no message content
+        and no personal data.
+      render: json
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      description: Shown on `chrome://extensions` and in the popup diagnostics panel.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chrome 141.0.7390.55 on Windows 11
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Export format
+      options: [HTML, TXT, JSON, CSV, Not format-specific]
+    validations:
+      required: false
+  - type: dropdown
+    id: media
+    attributes:
+      label: Media option
+      options: [None, Placeholders, Download (.zip), Not media-related]
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: |
+        Screenshots of the popup are helpful. Please redact chat names and message
+        content before attaching anything.
+    validations:
+      required: false

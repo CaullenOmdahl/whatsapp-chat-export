@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat Export — popup preview</title>
+    <link rel="stylesheet" href="../src/popup/popup.css" />
+    <style>
+      /* Preview only: make the file look like the real 380px popup. */
+      html,
+      body {
+        width: 380px;
+      }
+      body {
+        min-height: 100vh;
+      }
+      /* Screenshot helper: ?full=1 removes the 600px popup cap so the whole
+         document can be captured in one tall headless screenshot. */
+      html.preview-full body {
+        max-height: none;
+        overflow: visible;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!--
+      Preview harness. The chrome stub must exist BEFORE src/popup/popup.js runs.
+      Query params:
+        ?state=ready|no-chat|exporting|done|error|no-tab|not-ready|loading
+        &phase=scrolling|parsing|media|building|saving|indeterminate  (exporting)
+        &theme=dark|light        &long=1 (long chat name / filename)
+        &diag=1 (open diagnostics modal)   &history=0 (hide recent exports)
+      Everything below is test scaffolding only — the popup itself is unmodified.
+    -->
+    <script>
+      (function () {
+        'use strict';
+
+        var params = new URLSearchParams(window.location.search);
+        var scenario = (params.get('state') || 'ready').toLowerCase();
+        var theme = params.get('theme');
+        var longMode = params.get('long') === '1';
+        var withHistory = params.get('history') !== '0';
+        var TAB_ID = 42;
+        var WHATSAPP_URL = 'https://web.whatsapp.com/';
+        var TAB = {
+          id: TAB_ID,
+          active: true,
+          title: 'WhatsApp',
+          url: scenario === 'no-tab' ? 'https://example.com/' : WHATSAPP_URL,
+        };
+        var localData = {};
+        var sessionData = {};
+        var messageListeners = [];
+        var logs = [];
+        var now = Date.now();
+        var simulationTimer = null;
+        var simulationCancelled = false;
+
+        if (theme === 'dark') document.documentElement.classList.add('theme-dark');
+        else if (theme === 'light') document.documentElement.classList.add('theme-light');
+        if (params.get('full') === '1') document.documentElement.classList.add('preview-full');
+
+        function clone(value) {
+          if (value === undefined) return undefined;
+          return JSON.parse(JSON.stringify(value));
+        }
+
+        function createStorageArea(data) {
+          return {
+            get: function (keys, callback) {
+              setTimeout(function () {
+                var out = {};
+                if (keys === null || keys === undefined) {
+                  out = clone(data);
+                } else if (typeof keys === 'string') {
+                  if (keys in data) out[keys] = clone(data[keys]);
+                } else if (Array.isArray(keys)) {
+                  keys.forEach(function (key) {
+                    if (key in data) out[key] = clone(data[key]);
+                  });
+                } else if (typeof keys === 'object') {
+                  Object.keys(keys).forEach(function (key) {
+                    out[key] = key in data ? clone(data[key]) : keys[key];
+                  });
+                }
+                if (callback) callback(out);
+              }, 3);
+            },
+            set: function (items, callback) {
+              Object.keys(items || {}).forEach(function (key) {
+                data[key] = clone(items[key]);
+              });
+              setTimeout(function () {
+                if (callback) callback();
+              }, 3);
+            },
+            remove: function (keys, callback) {
+              var list = Array.isArray(keys) ? keys : [keys];
+              list.forEach(function (key) {
+                delete data[key];
+              });
+              setTimeout(function () {
+                if (callback) callback();
+              }, 3);
+            },
+          };
+        }
+
+        function log(entry) {
+          logs.push(entry);
+        }
+
+        function emit(message) {
+          messageListeners.slice().forEach(function (listener) {
+            try {
+              listener(message, { tab: { id: TAB_ID, url: TAB.url } }, function () {});
+            } catch (err) {
+              console.error('[preview] listener threw', err);
+            }
+          });
+        }
+
+        function baseChat() {
+          if (scenario === 'no-chat') {
+            return {
+              found: false,
+              name: '',
+              isGroup: false,
+              initials: '',
+              renderedCount: 0,
+              dateRange: null,
+              reason: 'No conversation is open.',
+            };
+          }
+          return {
+            found: true,
+            name: longMode
+              ? 'Design Team — APAC Product & Engineering Sync (Q4 Planning)'
+              : 'Design Team',
+            isGroup: true,
+            initials: 'DT',
+            renderedCount: 2481,
+            dateRange: { start: new Date(2026, 0, 3).getTime(), end: new Date(2026, 10, 12).getTime() },
+          };
+        }
+
+        var PHASES = {
+          scrolling: {
+            phase: 'scrolling',
+            loaded: 1240,
+            total: 2481,
+            detail: 'Scrolling up through history',
+            percent: 50,
+          },
+          parsing: {
+            phase: 'parsing',
+            loaded: 2481,
+            total: 2481,
+            detail: 'Reading 2,481 messages',
+            percent: 74,
+          },
+          media: {
+            phase: 'media',
+            loaded: 7,
+            total: 12,
+            detail: 'Saving image files',
+            percent: 34,
+          },
+          building: {
+            phase: 'building',
+            loaded: 2481,
+            total: 2481,
+            detail: 'Building the HTML transcript',
+            percent: 88,
+          },
+          saving: {
+            phase: 'saving',
+            loaded: 2481,
+            total: 2481,
+            detail: 'Writing the file to disk',
+            percent: 96,
+          },
+        };
+
+        function exportingState() {
+          var requested = params.get('phase') || 'scrolling';
+          if (requested === 'indeterminate') {
+            return {
+              phase: 'scrolling',
+              loaded: 320,
+              total: null,
+              detail: 'Scrolling up through history',
+              percent: null,
+              startedAt: now - 4200,
+              finishedAt: null,
+            };
+          }
+          var base = PHASES[requested] || PHASES.scrolling;
+          return Object.assign({ startedAt: now - 4200, finishedAt: null }, base);
+        }
+
+        function doneState() {
+          return {
+            phase: 'done',
+            loaded: 0,
+            total: null,
+            detail: '',
+            percent: 100,
+            startedAt: now - 62000,
+            finishedAt: now - 4000,
+            filename: longMode
+              ? 'Design Team — APAC Product & Engineering Sync — WhatsApp Chat (2026-11-12).html'
+              : 'WhatsApp Chat with Design Team.html',
+            bytes: 1464320,
+            messageCount: 2481,
+            warnings: ['2 media items could not be downloaded.'],
+          };
+        }
+
+        function errorState() {
+          return {
+            phase: 'error',
+            loaded: 0,
+            total: null,
+            detail: '',
+            percent: null,
+            startedAt: now - 21000,
+            finishedAt: now - 18000,
+            error: {
+              code: 'E_MEDIA_SAVE',
+              message: "Couldn't save all media files to the zip.",
+              hint: 'Try media set to “Placeholders”, or retry with fewer files.',
+            },
+          };
+        }
+
+        function currentState() {
+          if (scenario === 'exporting') return exportingState();
+          if (scenario === 'done') return doneState();
+          if (scenario === 'error') return errorState();
+          return null;
+        }
+
+        function historyEntries() {
+          if (!withHistory) return [];
+          return [
+            {
+              filename: longMode
+                ? 'Design Team — APAC Product & Engineering Sync — WhatsApp Chat (2026-11-12).html'
+                : 'WhatsApp Chat with Design Team.html',
+              messageCount: 2481,
+              bytes: 1464320,
+              format: 'html',
+              at: now - 2 * 60 * 60 * 1000,
+            },
+            {
+              filename: 'Design Team — WhatsApp media.zip',
+              messageCount: 2481,
+              bytes: 238 * 1024 * 1024,
+              format: 'html',
+              at: now - 26 * 60 * 60 * 1000,
+            },
+            {
+              filename: 'Design Team chat.csv',
+              messageCount: 1120,
+              bytes: 84480,
+              format: 'csv',
+              at: now - 3 * 24 * 60 * 60 * 1000,
+            },
+          ];
+        }
+
+        function diagnosticsReport() {
+          return {
+            url: WHATSAPP_URL,
+            mainPanel: true,
+            messageList: true,
+            scrollContainer: true,
+            renderedRows: 2481,
+            parsedMessages: 2481,
+            selectors: [
+              { name: 'mainPanel', selector: '#app .two > div > ._aigv', matches: 1 },
+              { name: 'messageList', selector: '[role="application"] ._akbu', matches: 1 },
+              { name: 'scrollContainer', selector: '#main [data-tab="8"]', matches: 1 },
+              { name: 'messageRow', selector: 'div.message-in, div.message-out', matches: 2481 },
+              { name: 'authorLabel', selector: '.copyable-text span[dir="auto"]', matches: 1842 },
+              { name: 'legacyRow', selector: '.message-list .msg-row', matches: 0 },
+              { name: 'reactionPill', selector: 'button[aria-label*="reaction"]', matches: 0 },
+            ],
+            warnings: [
+              'Read receipts are not rendered for messages older than 90 days.',
+              '2 media items could not be downloaded.',
+            ],
+          };
+        }
+
+        function replyTo(message) {
+          switch (message && message.type) {
+            case 'WAX:PING':
+              return { ok: true, chat: baseChat(), state: currentState(), version: '1.0.0' };
+            case 'WAX:EXPORT':
+              window.__preview.lastExport = message;
+              return { accepted: true };
+            case 'WAX:CANCEL':
+              return { ok: true };
+            case 'WAX:DIAGNOSE':
+              return diagnosticsReport();
+            default:
+              return { ok: true };
+          }
+        }
+
+        function sendToTab(tabId, message, callback) {
+          setTimeout(function () {
+            if (scenario === 'loading') {
+              // Simulate a WhatsApp tab that never answers the ping.
+              return;
+            }
+            if (scenario === 'not-ready') {
+              window.chrome.runtime.lastError = {
+                message: 'Could not establish connection. Receiving end does not exist.',
+              };
+              try {
+                if (callback) callback(undefined);
+              } finally {
+                window.chrome.runtime.lastError = null;
+              }
+              return;
+            }
+            var reply = replyTo(message);
+            if (message && message.type === 'WAX:EXPORT') {
+              scheduleSimulation();
+            }
+            if (message && message.type === 'WAX:CANCEL') {
+              simulationCancelled = true;
+              if (simulationTimer) {
+                clearTimeout(simulationTimer);
+                simulationTimer = null;
+              }
+              setTimeout(function () {
+                emit({
+                  type: 'WAX:PROGRESS',
+                  phase: 'cancelled',
+                  loaded: 1240,
+                  total: 2481,
+                  detail: '',
+                  percent: null,
+                });
+              }, 220);
+            }
+            if (callback) callback(reply);
+          }, 15);
+        }
+
+        function scheduleSimulation() {
+          if (simulationTimer) return;
+          var steps = [
+            { type: 'WAX:PROGRESS', phase: 'scrolling', loaded: 480, total: 2481, detail: 'Scrolling up through history', percent: 19 },
+            { type: 'WAX:PROGRESS', phase: 'scrolling', loaded: 1680, total: 2481, detail: 'Scrolling up through history', percent: 61 },
+            { type: 'WAX:PROGRESS', phase: 'parsing', loaded: 2481, total: 2481, detail: 'Reading 2,481 messages', percent: 76 },
+            { type: 'WAX:PROGRESS', phase: 'building', loaded: 2481, total: 2481, detail: 'Building the HTML transcript', percent: 92 },
+            { type: 'WAX:PROGRESS', phase: 'saving', loaded: 2481, total: 2481, detail: 'Writing the file to disk', percent: 98 },
+          ];
+          var index = 0;
+          function step() {
+            if (simulationCancelled) {
+              simulationTimer = null;
+              return;
+            }
+            if (index < steps.length) {
+              emit(steps[index]);
+              index += 1;
+              simulationTimer = setTimeout(step, 650);
+              return;
+            }
+            var finishedAt = Date.now();
+            var entry = {
+              filename: 'WhatsApp Chat with Design Team.html',
+              messageCount: 2481,
+              bytes: 1464320,
+              format: 'html',
+              at: finishedAt,
+            };
+            emit({
+              type: 'WAX:RESULT',
+              ok: true,
+              filename: entry.filename,
+              bytes: entry.bytes,
+              messageCount: entry.messageCount,
+              warnings: [],
+              historyEntry: entry,
+            });
+            var existing = localData['wax:history'];
+            localData['wax:history'] = [entry].concat(Array.isArray(existing) ? existing : []).slice(0, 5);
+            simulationTimer = null;
+          }
+          simulationTimer = setTimeout(step, 350);
+        }
+
+        window.chrome = {
+          runtime: {
+            lastError: null,
+            onMessage: {
+              addListener: function (listener) {
+                messageListeners.push(listener);
+              },
+              removeListener: function (listener) {
+                var index = messageListeners.indexOf(listener);
+                if (index !== -1) messageListeners.splice(index, 1);
+              },
+            },
+            sendMessage: function (message, callback) {
+              log({ type: 'runtime.sendMessage', message: message });
+              if (callback) setTimeout(function () { callback({ ok: true }); }, 2);
+            },
+            getURL: function (path) {
+              return path;
+            },
+          },
+          storage: {
+            local: createStorageArea(localData),
+            session: createStorageArea(sessionData),
+          },
+          tabs: {
+            query: function (query, callback) {
+              log({ type: 'tabs.query', query: query });
+              setTimeout(function () {
+                if (callback) callback([TAB]);
+              }, 4);
+            },
+            create: function (options, callback) {
+              log({ type: 'tabs.create', options: options });
+              setTimeout(function () {
+                if (callback) callback({ id: 99, url: options && options.url });
+              }, 4);
+            },
+            reload: function (tabId, options, callback) {
+              log({ type: 'tabs.reload', tabId: tabId, options: options });
+              if (callback) setTimeout(callback, 4);
+            },
+            sendMessage: sendToTab,
+          },
+          scripting: {
+            executeScript: function (options, callback) {
+              log({ type: 'scripting.executeScript', options: options });
+              setTimeout(function () {
+                if (scenario === 'not-ready') {
+                  window.chrome.runtime.lastError = {
+                    message: 'Cannot access contents of the page. The extension does not have permission for this host.',
+                  };
+                  try {
+                    if (callback) callback();
+                  } finally {
+                    window.chrome.runtime.lastError = null;
+                  }
+                  return;
+                }
+                if (callback) callback();
+              }, 8);
+            },
+          },
+        };
+
+        window.__preview = {
+          scenario: scenario,
+          params: params,
+          log: logs,
+          emit: emit,
+          buildHistory: historyEntries,
+          diagnosticsReport: diagnosticsReport,
+          isWhatsAppTab: scenario !== 'no-tab',
+          getStored: function () {
+            return clone(localData);
+          },
+        };
+      })();
+    </script>
+
+    <script src="../src/lib/namespace.js"></script>
+    <script>
+      (function () {
+        'use strict';
+
+        var DATETIME_SRC = '../src/lib/datetime.js';
+        var POPUP_SRC = '../src/popup/popup.js';
+
+        function loadScript(src) {
+          return new Promise(function (resolve) {
+            var script = document.createElement('script');
+            script.src = src;
+            script.async = false;
+            script.onload = function () {
+              resolve(true);
+            };
+            script.onerror = function () {
+              script.remove();
+              resolve(false);
+            };
+            document.body.appendChild(script);
+          });
+        }
+
+        /* The spec asks for a conditional load: probe with HEAD first, then
+           fall back to an onerror stub for file:// where HEAD is blocked. */
+        function probe(src) {
+          return fetch(src, { method: 'HEAD' })
+            .then(function (response) {
+              return response.ok;
+            })
+            .catch(function () {
+              return new Promise(function (resolve) {
+                try {
+                  var xhr = new XMLHttpRequest();
+                  xhr.open('HEAD', src, true);
+                  xhr.onload = function () {
+                    resolve(xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300));
+                  };
+                  xhr.onerror = function () {
+                    resolve(false);
+                  };
+                  xhr.send();
+                } catch (err) {
+                  resolve(false);
+                }
+              });
+            });
+        }
+
+        function stubDatetime() {
+          if (!window.WAEx || window.WAEx.datetime) return;
+          window.WAEx.datetime = {
+            relativeTime: function (ts) {
+              var diff = Math.max(0, Date.now() - ts);
+              if (diff < 45000) return 'just now';
+              var minutes = Math.round(diff / 60000);
+              if (minutes < 60) return minutes + 'm ago';
+              var hours = Math.round(minutes / 60);
+              if (hours < 24) return hours + 'h ago';
+              return Math.round(hours / 24) + 'd ago';
+            },
+            formatRange: function (range) {
+              if (!range) return '';
+              return new Date(range.start).toLocaleDateString() + ' – ' + new Date(range.end).toLocaleDateString();
+            },
+          };
+        }
+
+        function seedStorage() {
+          return new Promise(function (resolve) {
+            var history = window.__preview.buildHistory();
+            var data = {};
+            data[window.WAEx.HISTORY_KEY] = history;
+            var media = window.__preview.params.get('media');
+            if (media) data[window.WAEx.STORAGE_KEY] = { mediaMode: media };
+            chrome.storage.local.set(data, resolve);
+          });
+        }
+
+        function clickGear() {
+          var button = document.getElementById('gear-btn');
+          if (button) button.click();
+        }
+
+        function clickById(id) {
+          var button = document.getElementById(id);
+          if (button) button.click();
+        }
+
+        function setReversedCustomRange() {
+          var select = document.getElementById('date-range');
+          if (!select) return;
+          select.value = 'custom';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          var start = document.getElementById('custom-start');
+          var end = document.getElementById('custom-end');
+          if (!start || !end) return;
+          start.value = '2026-11-12';
+          end.value = '2026-01-03';
+          [start, end].forEach(function (input) {
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+        }
+
+        function runActions() {
+          var action = window.__preview.params.get('action');
+          if (!action) return;
+          if (action === 'export') {
+            setTimeout(function () {
+              clickById('export-btn');
+            }, 300);
+          } else if (action === 'cancel') {
+            setTimeout(function () {
+              clickById('export-btn');
+            }, 300);
+            setTimeout(function () {
+              clickById('progress-cancel');
+            }, 1500);
+          } else if (action === 'custombad') {
+            setTimeout(setReversedCustomRange, 350);
+          } else if (action === 'diagcopy') {
+            setTimeout(function () {
+              clickGear();
+              setTimeout(function () {
+                clickById('diag-copy');
+              }, 350);
+            }, 300);
+          } else if (action === 'inspect-medialimit') {
+            setTimeout(function () {
+              var input = document.getElementById('media-limit');
+              if (input) {
+                input.value = '120';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              setTimeout(function () {
+                clickById('export-btn');
+              }, 250);
+              setTimeout(function () {
+                document.title = JSON.stringify({
+                  exportSettings: window.__preview.lastExport && window.__preview.lastExport.settings,
+                  stored: window.__preview.getStored(),
+                });
+              }, 1200);
+            }, 450);
+          } else if (action === 'diagbottom') {
+            setTimeout(function () {
+              clickGear();
+              setTimeout(function () {
+                var body = document.getElementById('diag-body');
+                if (body) body.scrollTop = body.scrollHeight;
+              }, 700);
+            }, 300);
+          }
+        }
+
+        function boot() {
+          probe(DATETIME_SRC)
+            .then(function (exists) {
+              if (!exists) return false;
+              return loadScript(DATETIME_SRC);
+            })
+            .then(function (loaded) {
+              if (!loaded) stubDatetime();
+              return loadScript(POPUP_SRC);
+            })
+            .then(function () {
+              if (window.__preview.params.get('diag') === '1') {
+                setTimeout(clickGear, 550);
+              }
+              runActions();
+            });
+        }
+
+        seedStorage().then(boot);
+      })();
+    </script>
+  </body>
+</html>

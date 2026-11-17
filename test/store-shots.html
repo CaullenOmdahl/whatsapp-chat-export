@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Chat Export for WhatsApp — store artwork</title>
+    <style>
+      :root {
+        --green: #00a884;
+        --green-dark: #007a63;
+        --ink: #0b2e26;
+        --muted: #4b635c;
+        --line: rgba(11, 46, 38, 0.1);
+        --font: "Adwaita Sans", "Cantarell", "Liberation Sans", "DejaVu Sans", sans-serif;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body { width: 100%; height: 100%; overflow: hidden; }
+
+      body {
+        font-family: var(--font);
+        background: #eef4f1;
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .canvas {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        padding: 64px 72px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 64px;
+        align-items: center;
+        background:
+          radial-gradient(900px 620px at 88% -10%, rgba(0, 168, 132, 0.18), transparent 60%),
+          radial-gradient(700px 520px at -8% 108%, rgba(37, 211, 102, 0.16), transparent 60%),
+          linear-gradient(135deg, #f8fbfa 0%, #eef4f1 58%, #e2efe9 100%);
+      }
+
+      .canvas::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(11, 46, 38, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(11, 46, 38, 0.035) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: radial-gradient(circle at 30% 40%, black, transparent 78%);
+        pointer-events: none;
+      }
+
+      .copy { position: relative; z-index: 1; max-width: 620px; }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 13px 7px 10px;
+        border-radius: 999px;
+        background: rgba(0, 168, 132, 0.12);
+        color: var(--green-dark);
+        font-size: 12.5px;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow svg { width: 15px; height: 15px; }
+
+      h1 {
+        margin-top: 22px;
+        font-size: 52px;
+        line-height: 1.05;
+        letter-spacing: -0.025em;
+        font-weight: 800;
+      }
+
+      .lede {
+        margin-top: 18px;
+        font-size: 19px;
+        line-height: 1.5;
+        color: var(--muted);
+        max-width: 540px;
+      }
+
+      ul {
+        margin-top: 30px;
+        list-style: none;
+        display: grid;
+        gap: 14px;
+        max-width: 540px;
+      }
+
+      li {
+        display: flex;
+        gap: 12px;
+        font-size: 17px;
+        line-height: 1.4;
+        color: #173f35;
+      }
+
+      li b { font-weight: 700; }
+
+      .tick {
+        flex: 0 0 auto;
+        width: 22px;
+        height: 22px;
+        margin-top: 1px;
+        border-radius: 50%;
+        background: var(--green);
+        display: grid;
+        place-items: center;
+      }
+
+      .tick svg { width: 13px; height: 13px; }
+
+      .foot {
+        margin-top: 34px;
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--green-dark);
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 9px 15px;
+      }
+
+      .foot svg { width: 16px; height: 16px; }
+
+      .device {
+        position: relative;
+        z-index: 1;
+        justify-self: center;
+        width: 380px;
+        height: 640px;
+        border-radius: 18px;
+        overflow: hidden;
+        background: #fff;
+        border: 1px solid rgba(11, 46, 38, 0.12);
+        box-shadow:
+          0 2px 4px rgba(6, 44, 35, 0.08),
+          0 34px 70px -18px rgba(6, 44, 35, 0.4),
+          0 0 0 10px rgba(255, 255, 255, 0.55);
+      }
+
+      .device img {
+        display: block;
+        width: 380px;
+        height: auto;
+        object-fit: cover;
+        object-position: top center;
+      }
+
+      /* ------------------------------------------------ promo tile 440x280 */
+
+      body.tile { background: transparent; }
+
+      .tile-canvas {
+        width: 440px;
+        height: 280px;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 26px;
+        background:
+          radial-gradient(420px 260px at 20% 0%, #0b8f74 0%, transparent 62%),
+          linear-gradient(150deg, #00a884 0%, #007a63 100%);
+        color: #fff;
+      }
+
+      .tile-inner { display: grid; justify-items: center; gap: 12px; }
+
+      .tile-icon {
+        width: 78px;
+        height: 78px;
+        border-radius: 20px;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+      }
+
+      .tile-title {
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+      }
+
+      .tile-sub {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.82);
+      }
+
+      /* --------------------------------------------- marquee 1400x560 */
+
+      body.marquee .canvas {
+        padding: 56px 84px;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 72px;
+      }
+
+      body.marquee h1 { font-size: 58px; max-width: 720px; }
+      body.marquee .lede { font-size: 21px; max-width: 620px; }
+      body.marquee ul { grid-template-columns: 1fr 1fr; gap: 16px 26px; max-width: 720px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script>
+      // Rendered by headless Chrome into docs/store/*.png. Copy is intentionally
+      // factual: no claims beyond what the README documents.
+      var TICK =
+        '<span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>';
+      var SHIELD =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2 19 6v5.2c0 4.4-3 8.1-7 9.6-4-1.5-7-5.2-7-9.6V6l7-2.8Z"/><path d="M9.2 11.9l2 2 3.6-3.9"/></svg>';
+      var LOGO =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.6c0 4.2-3.9 7.6-8.7 7.6-1 0-2-.15-2.9-.43L4.6 20.2l1.2-3.7a7.05 7.05 0 0 1-2.1-4.9C3.7 7.4 7.6 4 12.3 4S21 7.4 21 11.6Z"/><path d="M12.8 7.7v6.1m0 0 2.3-2.4m-2.3 2.4-2.3-2.4"/></svg>';
+
+      var SHOTS = {
+        1: {
+          image: 'screenshots/ready.png',
+          headline: 'Export any WhatsApp chat in one click.',
+          lede: 'The save button WhatsApp Web is missing. Pick a format, press export, get a file.',
+          bullets: [
+            ['Loads the whole history', 'scrolls up through the conversation by itself'],
+            ['Four formats', 'HTML, plain text, JSON and CSV'],
+            ['No setup', 'works on the chat you already have open'],
+          ],
+        },
+        2: {
+          image: 'screenshots/ready-full.png',
+          headline: 'Four formats. One button.',
+          lede: 'The same conversation, shaped for what you want to do with it.',
+          bullets: [
+            ['HTML', 'a styled transcript that opens in any browser'],
+            ['TXT', 'WhatsApp-style plain text you can grep'],
+            ['JSON', 'structured messages for scripts and analysis'],
+            ['CSV', 'one row per message for Excel or Sheets'],
+          ],
+        },
+        3: {
+          image: 'screenshots/ready-download.png',
+          headline: 'Media comes along.',
+          lede: 'Photos, video, voice notes and documents are bundled into a single .zip with the report.',
+          bullets: [
+            ['One archive', 'the report and its media files, ready to keep'],
+            ['Honest about gaps', 'items WhatsApp never rendered are marked missing'],
+            ['A limit you set', 'stop at the size you choose, 10–2048 MB'],
+          ],
+        },
+        4: {
+          image: 'screenshots/exporting.png',
+          headline: 'Long chats, visible progress.',
+          lede: 'Watch the history load message by message. Cancel at any point and nothing is saved.',
+          bullets: [
+            ['Close the popup', 'the export keeps running in the tab'],
+            ['Reopen it', 'live progress is back where you left it'],
+            ['Recent exports', 'the last five files, one click to find them'],
+          ],
+        },
+        5: {
+          image: 'screenshots/diag.png',
+          headline: 'Nothing leaves your browser.',
+          lede: 'No account, no server, no telemetry. And when WhatsApp changes its page, the extension tells you why it broke.',
+          bullets: [
+            ['Zero network calls', 'verified by the test suite, not just promised'],
+            ['Diagnostics panel', 'which page selectors matched, and which did not'],
+            ['Open source', 'MIT licensed, readable, testable'],
+          ],
+        },
+      };
+
+      function shot(n) {
+        var data = SHOTS[n] || SHOTS[1];
+        var list = data.bullets
+          .map(function (pair) {
+            return '<li>' + TICK + '<span><b>' + pair[0] + '</b> — ' + pair[1] + '</span></li>';
+          })
+          .join('');
+        document.getElementById('root').innerHTML =
+          '<div class="canvas">' +
+          '<div class="copy">' +
+          '<span class="eyebrow">' + LOGO + 'Chrome extension</span>' +
+          '<h1>' + data.headline + '</h1>' +
+          '<p class="lede">' + data.lede + '</p>' +
+          '<ul>' + list + '</ul>' +
+          '<span class="foot">' + SHIELD + 'Files are created on your device. Nothing is uploaded.</span>' +
+          '</div>' +
+          '<div class="device"><img src="' + data.image + '" alt=""></div>' +
+          '</div>';
+      }
+
+      function tile() {
+        document.body.classList.add('tile');
+        document.getElementById('root').innerHTML =
+          '<div class="tile-canvas"><div class="tile-inner">' +
+          '<img class="tile-icon" src="../icons/icon128.png" alt="">' +
+          '<div class="tile-title">Chat Export<br>for WhatsApp</div>' +
+          '<div class="tile-sub">HTML · TXT · JSON · CSV</div>' +
+          '</div></div>';
+      }
+
+      function marquee() {
+        document.body.classList.add('marquee');
+        document.getElementById('root').innerHTML =
+          '<div class="canvas">' +
+          '<div class="copy">' +
+          '<span class="eyebrow">' + LOGO + 'Chrome extension</span>' +
+          '<h1>Export any WhatsApp chat in one click.</h1>' +
+          '<p class="lede">HTML, TXT, JSON or CSV — with media bundled into a single .zip. Loads the full history by itself, and never sends a byte anywhere.</p>' +
+          '<ul>' +
+          '<li>' + TICK + '<span><b>Whole history</b> — loaded automatically</span></li>' +
+          '<li>' + TICK + '<span><b>Four formats</b> — from one conversation</span></li>' +
+          '<li>' + TICK + '<span><b>Media in a .zip</b> — next to the report</span></li>' +
+          '<li>' + TICK + '<span><b>100% local</b> — no account, no server</span></li>' +
+          '</ul>' +
+          '</div>' +
+          '<div class="device"><img src="screenshots/ready.png" alt=""></div>' +
+          '</div>';
+      }
+
+      var params = new URLSearchParams(location.search);
+      if (params.get('tile') === '1') tile();
+      else if (params.get('marquee') === '1') marquee();
+      else shot(Number(params.get('shot') || 1));
+    </script>
+  </body>
+</html>

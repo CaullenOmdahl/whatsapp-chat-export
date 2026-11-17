@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat Export — WhatsApp Web</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <!--
+      The popup shell is built from src/popup/popup.js so that the exact same UI
+      can be rendered by test/popup-preview.html. Classic scripts only: the
+      extension popup has no module loader and a strict MV3 CSP (no inline JS).
+    -->
+    <div id="app"></div>
+
+    <script src="../lib/namespace.js"></script>
+    <script src="../lib/datetime.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

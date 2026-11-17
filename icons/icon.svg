@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Chat Export for WhatsApp: white speech bubble with a download arrow on a green tile">
+  <desc>
+    Vector source for icons/icon16.png, icon32.png, icon48.png and icon128.png.
+    Rounded green tile (#25D366 to #00A884 diagonal gradient) with a white speech
+    bubble and a download arrow. The extension's icon generator draws the same
+    design programmatically; at 16 px and 32 px it uses a slightly larger bubble
+    and a thicker arrow so the shape still reads after downsampling.
+  </desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#25D366"/>
+      <stop offset="1" stop-color="#00A884"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded-square tile -->
+  <rect width="128" height="128" rx="29" fill="url(#tile)"/>
+
+  <!-- Speech bubble with a tail pointing down-left -->
+  <path fill="#FFFFFF" d="M36 30 H92 A14 14 0 0 1 106 44 V70 A14 14 0 0 1 92 84 H56 L36 102 L40 84 H36 A14 14 0 0 1 22 70 V44 A14 14 0 0 1 36 30 Z"/>
+
+  <!-- Download arrow: shaft plus head -->
+  <path fill="#128C7E" d="M59.5 38 H68.5 V56 H82 L64 74 L46 56 H59.5 Z"/>
+</svg>
