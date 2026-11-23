@@ -151,6 +151,14 @@ Messages are parsed as they appear rather than at the end, so a message whose no
 later still reaches the export. The final DOM pass only adds notices and anything the loop did
 not see.
 
+WhatsApp (as of November 2026) keeps messages away from the viewport as empty placeholders: the
+`data-id` node with no timestamp attribute, text or media. A placeholder is never collected;
+it stays pending and is parsed again once WhatsApp fills it in. That is why loading always ends
+with a downward sweep from the oldest loaded message, a viewport at a time, waiting up to
+`hydrateTimeoutMs` per step for on-screen placeholders to fill in. Placeholders that never fill
+in are counted in a warning. A message with no timestamp of its own borrows the one of the
+message above it on the page.
+
 ### Timestamps
 
 `data-pre-plain-text` is the most reliable source because it contains the formatted date and time

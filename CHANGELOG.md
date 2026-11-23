@@ -4,6 +4,28 @@ All notable changes to **Chat Export for WhatsApp** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] — 2026-11-24
+
+### Fixed
+
+- **Messages are no longer exported blank.** WhatsApp keeps messages away from the viewport as
+  empty placeholders and fills them in only when they scroll into view. 1.0.3 collected the
+  placeholders as messages and never read them again: a 932-message export had 883 messages
+  with no author, text or date, and the rest on the wrong days. Placeholders are now left
+  pending, loading always finishes with a downward sweep that waits for each screen to fill
+  in, and any that never do are counted in a warning rather than exported empty.
+- A message without its own timestamp takes the time of the message above it on the page,
+  not of whichever message was parsed last.
+- The success panel lists every warning instead of only "2 warnings" with the text hidden
+  in a tooltip.
+- A one-to-one chat is no longer marked as a group in the export because the user's own
+  messages carry a second name.
+
+### Docs
+
+- README: "How it works" describes the two-pass load and placeholders; new Limitations
+  section.
+
 ## [1.0.3] — 2026-11-24
 
 ### Fixed

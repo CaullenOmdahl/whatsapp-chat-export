@@ -595,4 +595,64 @@ check('without direction classes, delivery ticks mark outgoing messages', () => 
   eq(parsed.find((m) => m.id === '3EB0AAA1C0FFEE').isOutgoing, false);
 });
 
+suite('extractor: off-screen placeholders (v1.0.3 live failure)');
+
+/**
+ * Live WhatsApp (2026-11) keeps messages away from the viewport as empty shells: the
+ * data-id node with no timestamp attribute, text or media. It fills them in shortly
+ * after they scroll into view. v1.0.3 collected the shells as empty messages and never
+ * looked again: 883 of 932 exported messages had no author, text or date.
+ */
+await checkAsync('shells are not exported empty; the sweep fills every message in', async () => {
+  const env = boot(buildFixtureHtml({ rows: conversationRows().map(opaque) }));
+  env.WAEx.extractor.LIMITS.hydrateTimeoutMs = 300;
+  const scroller = env.scroller;
+  const ROW = 100;
+  const nodes = Array.from(env.document.querySelectorAll('#main div[data-id]'));
+  const full = new Map(nodes.map((n) => [n, n.innerHTML]));
+  scroller.__scrollHeight = nodes.length * ROW;
+  scroller.__clientHeight = 300;
+
+  const render = (top) => {
+    nodes.forEach((node, i) => {
+      const visible = i * ROW + ROW > top && i * ROW < top + 300;
+      if (!visible) node.innerHTML = '';
+      else if (!node.innerHTML) setTimeout(() => (node.innerHTML = full.get(node)), 20);
+    });
+  };
+  scroller.__scrollTop = nodes.length * ROW - 300; // opened at the newest message
+  render(scroller.__scrollTop);
+  await new Promise((r) => setTimeout(r, 40));
+  scroller.__onScrollTop = (value) => render(value);
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  const messages = result.messages.filter((m) => m.id.startsWith('3EB0'));
+  eq(
+    messages.map((m) => m.id),
+    ['AAA1', 'AAA2', 'AAA3', 'AAA4', 'AAA5', 'AAA6', 'AAA7', 'BBB1', 'BBB2', 'BBB3'].map((t) => `3EB0${t}C0FFEE`),
+    'every message, in order'
+  );
+  eq(messages.filter((m) => !m.author).length, 0, 'every message has an author');
+  eq(messages.filter((m) => m.timestamp === null).length, 0, 'every message has a time');
+  eq(byIdOf(messages, 'BBB1').timestamp, AT(2023, 12, 25, 18, 0), 'times come from the message itself');
+  eq(byIdOf(messages, 'AAA2').text, "Perfect.\nI'll bring coffee ☕");
+  ok(!result.warnings.some((w) => /never filled in/.test(w)), JSON.stringify(result.warnings));
+});
+
+await checkAsync('shells that are never filled in are reported, not exported', async () => {
+  const env = boot(buildFixtureHtml({ rows: conversationRows().map(opaque) }));
+  const shells = Array.from(env.document.querySelectorAll('#main div[data-id]')).slice(0, 3);
+  for (const node of shells) node.innerHTML = '';
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.messages.filter((m) => m.id.startsWith('3EB0')).length, 7, 'shells are left out');
+  ok(
+    result.warnings.some((w) => /^3 messages could not be read/.test(w)),
+    'expected an unread-messages warning: ' + JSON.stringify(result.warnings)
+  );
+});
+
+function byIdOf(list, tail) {
+  return list.find((m) => m.id === `3EB0${tail}C0FFEE`);
+}
+
 process.exit(summary() ? 0 : 1);

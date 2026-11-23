@@ -245,6 +245,22 @@ await checkAsync('the file reached the download layer', async () => {
   eq(contentMock.session['wax:state'].phase, 'done');
 });
 
+await checkAsync('the success panel spells out each warning, not just a count', async () => {
+  const warnings = [
+    'Could not confirm that the first message of the conversation was reached.',
+    '3 message(s) had no readable timestamp.',
+  ];
+  for (const listener of popupListeners.slice()) {
+    listener(
+      { type: 'WAX:RESULT', ok: true, filename: 'x.html', bytes: 10, messageCount: 2, warnings },
+      { id: 'content' }
+    );
+  }
+  await waitFor(() => /2 warnings/.test(bodyText()), 10000, 'warning count');
+  const items = Array.from(popupDocument.querySelectorAll('.success-warning-list li')).map((li) => li.textContent);
+  eq(items, warnings, 'every warning is listed verbatim');
+});
+
 await checkAsync('history is shown in the popup', async () => {
   ok(Array.isArray(localStore['wax:history']), 'history should be stored');
   eq(localStore['wax:history'].length, 1);

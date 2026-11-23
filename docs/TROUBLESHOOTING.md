@@ -154,7 +154,9 @@ message list's scrollbar (fixed in 1.0.1). 1.0.1 only scrolled upwards, so a cha
 first message exported only the opening page (fixed in 1.0.2). 1.0.0–1.0.2 did not recognise the
 message ids current WhatsApp Web builds use, so every export held only the screenful of messages
 visible when loading finished, and a page that took more than about a second to arrive could end
-loading early (both fixed in 1.0.3). Update and reload the WhatsApp tab if you are on anything older.
+loading early (both fixed in 1.0.3). 1.0.3 then exported most messages blank — no author, text or date —
+because WhatsApp keeps off-screen messages as empty placeholders (fixed in 1.0.4). Update and
+reload the WhatsApp tab if you are on anything older.
 
 ### Media is missing from the export
 

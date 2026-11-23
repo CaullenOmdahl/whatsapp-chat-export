@@ -1332,11 +1332,17 @@
     }
     if (warnings.length) {
       children.push(
-        el('p', { className: 'success-warn', title: warnings.join('\n') }, [
+        el('p', { className: 'success-warn' }, [
           icon('alert'),
           el('span', { text: fmtNum(warnings.length) + (warnings.length === 1 ? ' warning' : ' warnings') }),
         ])
       );
+      // Spell the warnings out: they say what may be missing from the file and what to do.
+      var warningList = el('ul', { className: 'warning-list success-warning-list' });
+      warnings.forEach(function (warning) {
+        warningList.appendChild(el('li', { text: String(warning) }));
+      });
+      children.push(warningList);
     }
 
     var againButton = el('button', { type: 'button', className: 'btn btn-primary' }, [

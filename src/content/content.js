@@ -357,7 +357,13 @@
       setPhase(PHASE.BUILDING, 'Building file', { percent: null });
 
       var stats = formats.summarize(messages);
-      var isGroup = chatInfo.isGroup || stats.authors.length > 1;
+      // Only other people's names count: the user's own messages carry their own name,
+      // so counting every author makes each one-to-one chat look like a group.
+      var incomingAuthors = Object.create(null);
+      messages.forEach(function (m) {
+        if (!m.isOutgoing && m.author && m.type !== T.SYSTEM) incomingAuthors[m.author] = true;
+      });
+      var isGroup = chatInfo.isGroup || Object.keys(incomingAuthors).length > 1;
 
       var meta = {
         chat: { name: chatInfo.name, isGroup: isGroup },

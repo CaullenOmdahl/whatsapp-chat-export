@@ -1133,6 +1133,12 @@ html.theme-dark .chat-avatar {
   height: 13px;
 }
 
+.success-warning-list {
+  max-height: 160px;
+  margin: 4px 0 0;
+  overflow-y: auto;
+}
+
 .panel-actions {
   display: flex;
   gap: 8px;

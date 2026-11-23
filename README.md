@@ -132,7 +132,7 @@ quoted_author, quoted_text, reactions, media_kind, media_file, media_missing, me
 ```json
 {
   "schema": "chat-export/v1",
-  "generator": "Chat Export for WhatsApp 1.0.3",
+  "generator": "Chat Export for WhatsApp 1.0.4",
   "exportedAt": "2026-11-18T02:30:00.000Z",
   "chat": { "name": "Design Team", "isGroup": true },
   "settings": { "format": "json", "mediaMode": "link", "includeSystem": false,
@@ -282,14 +282,16 @@ test suite.
 - **A content script runs inside the WhatsApp Web tab**, only on `https://web.whatsapp.com/*`, and
   only after you ask it to. It reads the already-rendered page; it has no network access.
 - **The conversation is scraped structurally, not by class name.** WhatsApp rotates obfuscated
-  class names constantly, so the scraper keys off stable facts: `#main`, `div[data-id]` message
-  ids, the `data-pre-plain-text` timestamp/author attribute, and `.selectable-text` bodies. Every
-  lookup has a fallback chain, and a miss becomes a warning rather than a failed export.
-- **History is loaded page by page.** It scrolls to the top to make WhatsApp fetch older messages,
-  waits for the page to render, and parses only what it has not seen yet. When a jump stops
-  producing pages it switches to viewport-sized scroll steps before concluding the chat is fully
-  loaded. Messages are kept as they are seen, so ones WhatsApp removes from the DOM mid-scroll
-  still reach the file.
+  class names constantly, so the scraper keys off stable facts: `#main`, the `data-id` on each
+  message row, the `data-pre-plain-text` timestamp/author attribute, and `.selectable-text`
+  bodies. Every lookup has a fallback chain, and a miss becomes a warning rather than a failed
+  export.
+- **History is loaded in two passes.** First it scrolls to the top so WhatsApp fetches older
+  pages, until it reaches the first message (or the start of your date range). Then it walks back
+  down a screen at a time. WhatsApp only fills in the messages that are on screen — the rest are
+  empty placeholders — so the walk gives each screen a moment to fill in and reads it then.
+  Messages are kept as they are read, so ones WhatsApp removes from the page later still reach the
+  file, and any that never filled in are counted in a warning instead of exported blank.
 - **Timestamps are parsed per locale.** WhatsApp renders dates differently in every language, and
   the day/month order is inferred from the conversation itself, not assumed.
 - **Everything is normalised into one message model** (author, direction, type, text, quote,
@@ -300,6 +302,21 @@ test suite.
 More detail, including the selector strategy and failure modes, is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The popup ↔ content-script contract is in
 [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+---
+
+## Limitations
+
+- **Only what WhatsApp Web has.** The extension reads the conversation as WhatsApp Web shows it.
+  If WhatsApp Web does not have the older history (it may offer to load it from your phone), the
+  export cannot include it.
+- **Media must have been on screen.** Photos and files are only captured if WhatsApp has loaded
+  them in the page; the rest become marked placeholders.
+- **Keep the tab in the foreground.** Browsers throttle background tabs, which slows WhatsApp's
+  loading and can leave messages unread; any that are missed are counted in a warning.
+- **WhatsApp changes its page without notice.** When it does, exports can come out short or
+  incomplete until the extension is updated. Compare against a phone export with
+  `npm run compare` if completeness matters, and check the warnings in the popup.
 
 ---
 
@@ -389,7 +406,7 @@ npm run build         # dist/whatsapp-chat-export-v<version>.zip, ready for the 
 | Script | What it does |
 | --- | --- |
 | `npm run test:<suite>` | Run one suite (`manifest`, `datetime`, `formats`, `zip`, `extractor`, `e2e`, `popup`) |
-| `npm run screenshots` | Regenerate the 26 popup screenshots in `test/screenshots/` |
+| `npm run screenshots` | Regenerate the popup screenshots in `test/screenshots/` |
 | `npm run store-shots` | Regenerate the 1280×800 Web Store artwork in `docs/store/` |
 | `npm run examples` | Regenerate the sample exports in `docs/examples/` |
 | `npm run compare -- ours.zip theirs.zip` | Compare an export against another source's export of the same chat (aggregate counts only) |

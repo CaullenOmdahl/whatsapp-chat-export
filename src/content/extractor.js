@@ -48,6 +48,12 @@
     downIdleRounds: 3,
     /** Delay between fast downward steps through already-rendered messages. */
     stepDelayMs: 30,
+    /**
+     * WhatsApp keeps messages away from the viewport as empty shells (a data-id and a
+     * height) and fills them in when they scroll into view. After each sweep step, wait
+     * up to this long for the on-screen shells to be filled in.
+     */
+    hydrateTimeoutMs: 1500,
     settleAfterLoadMs: 80,
     /** Absolute ceiling, so a runaway loop cannot exhaust memory. */
     maxMessages: 150000,
@@ -675,6 +681,8 @@
     var startedAtNewest = Boolean(scroller) && originalTop + originalClient >= originalHeight - 8;
 
     var collected = Object.create(null); // message id -> parsed Message
+    var hollow = Object.create(null); // message id -> true while only an empty shell was seen
+    var hollowNodes = []; // shells found by the latest collect()
     var seen = Object.create(null); // message id -> node, kept for recovery/diagnostics
     var parseIndex = 0;
     var ctx = {
@@ -691,20 +699,68 @@
       return measureList(main, scroller);
     }
 
+    /**
+     * Parse every message node not collected yet, in DOM order. Empty shells are left
+     * uncollected so they are parsed again once WhatsApp fills them in. A message with
+     * no timestamp of its own (media, for instance) borrows the one of the message just
+     * above it on the page, not of whatever was parsed last.
+     */
     function collect() {
       var nodes = messageNodes(main);
       var added = 0;
+      ctx.lastTimestamp = null;
+      hollowNodes = [];
       for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
         var id = node.getAttribute('data-id');
-        if (!id || collected[id]) continue;
-        seen[id] = node;
+        if (!id) continue;
+        if (collected[id]) {
+          if (collected[id]._ownTime) ctx.lastTimestamp = collected[id].timestamp;
+          continue;
+        }
         ctx.index = parseIndex++;
         var message = parseRow(node, ctx);
         if (!message) continue;
-        if (message.timestamp) ctx.lastTimestamp = message.timestamp;
+        if (message._hollow) {
+          hollow[id] = true;
+          hollowNodes.push(node);
+          continue;
+        }
+        seen[id] = node;
+        delete hollow[id];
+        if (message._ownTime) ctx.lastTimestamp = message.timestamp;
         collected[id] = message;
         added++;
+      }
+      return added;
+    }
+
+    /** Shells currently inside the viewport (all of them when layout is unavailable). */
+    function visibleHollowCount() {
+      if (!hollowNodes.length) return 0;
+      var box = scroller && scroller.getBoundingClientRect ? scroller.getBoundingClientRect() : null;
+      var count = 0;
+      for (var i = 0; i < hollowNodes.length; i++) {
+        var node = hollowNodes[i];
+        if (!node.isConnected) continue;
+        var rect = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+        if (!box || !rect || (!box.height && !rect.height)) {
+          count++;
+          continue;
+        }
+        if (rect.bottom >= box.top && rect.top <= box.bottom) count++;
+      }
+      return count;
+    }
+
+    /** Collect, then give on-screen shells time to be filled in. */
+    async function collectHydrated() {
+      var added = collect();
+      var waited = 0;
+      while (visibleHollowCount() > 0 && waited < LIMITS.hydrateTimeoutMs && !shouldCancel()) {
+        await sleep(LIMITS.pollMs);
+        waited += LIMITS.pollMs;
+        added += collect();
       }
       return added;
     }
@@ -881,12 +937,16 @@
       }
     }
 
-    /* ---------------------------------------------------- pass 2: newer */
+    /* ------------------------------------------- pass 2: sweep down, newer */
 
-    // Only needed when the conversation was not already at its newest message. If it
-    // was, pass 1 loaded everything above and the bottom is unchanged.
-    if (scroller && !cancelled && !startedAtNewest && !endDateCovered()) {
+    // Always walk the loaded history from the top, a viewport at a time: WhatsApp only
+    // fills in messages that come on screen, so jumping to the top in pass 1 leaves
+    // everything in between as empty shells. If the conversation did not start at its
+    // newest message, keep loading below the bottom until nothing newer arrives.
+    if (scroller && !cancelled) {
       var idleAtBottom = 0;
+      if ((scroller.scrollTop || 0) > 0) scroller.scrollTop = 0;
+      parsedCount += await collectHydrated();
 
       while (!finished()) {
         var remaining =
@@ -894,6 +954,9 @@
         var atBottom = remaining <= 4;
 
         if (atBottom) {
+          // Started at the newest message: the bottom is already known.
+          if (startedAtNewest) break;
+          if (endDateCovered()) break;
           var baselineDown = listMetrics();
           nudgeScroll(scroller, 'down');
           var changeDown = await waitForDomChange(scroller, baselineDown);
@@ -920,12 +983,11 @@
           nudgeScroll(scroller, 'down');
           await sleep(LIMITS.stepDelayMs);
 
-          var addedStep = collect();
+          var addedStep = await collectHydrated();
           parsedCount += addedStep;
           rounds++;
           report('down');
           idleAtBottom = 0;
-          if (endDateCovered()) break;
         }
       }
     }
@@ -939,14 +1001,34 @@
       harvested: seen,
       includeReactions: opts.includeReactions,
     });
-    var merged = domResult.messages.slice();
+    // DOM order of the final pass first, then anything collected while scrolling that is
+    // no longer rendered. Collected copies win: they were parsed in page order, so their
+    // borrowed timestamps come from the right neighbour.
+    var merged = [];
     var known = Object.create(null);
-    for (var i = 0; i < merged.length; i++) known[merged[i].id] = true;
+    for (var i = 0; i < domResult.messages.length; i++) {
+      var domMessage = domResult.messages[i];
+      merged.push(collected[domMessage.id] || domMessage);
+      known[domMessage.id] = true;
+    }
     for (var id in collected) {
       if (!hasOwn(collected, id) || known[id]) continue;
       merged.push(collected[id]);
+      known[id] = true;
     }
     merged = backfillAndSort(merged);
+
+    var unread = 0;
+    for (var hollowId in hollow) {
+      if (hasOwn(hollow, hollowId) && !known[hollowId]) unread++;
+    }
+    if (unread > 0) {
+      warnings.push(
+        WAEx.plural(unread, 'message') +
+          ' could not be read because WhatsApp never filled in their content. ' +
+          'Keep the WhatsApp tab in the foreground while exporting, then export again.'
+      );
+    }
 
     warnings = warnings.concat(domResult.warnings || []);
     if (cancelled) warnings.push('Export cancelled while messages were still loading.');
@@ -1281,6 +1363,7 @@
     var pre = preEl ? dt.parsePrePlainText(preEl.getAttribute('data-pre-plain-text')) : null;
 
     var timestamp = null;
+    var ownTime = false;
     var timeText = '';
     var author = '';
 
@@ -1289,6 +1372,7 @@
       author = pre.author;
       var dateParts = dt.parseDateText(pre.dateText, ctx.order || 'dmy');
       timestamp = dt.toEpoch(dateParts, dt.parseTimeText(pre.timeText));
+      ownTime = timestamp !== null;
       if (timestamp === null && ctx.lastTimestamp) timestamp = ctx.lastTimestamp;
     } else if (ctx.lastTimestamp) {
       timestamp = ctx.lastTimestamp;
@@ -1346,6 +1430,9 @@
           }
         : null,
       _quoteRoot: quote ? quote.isRoot : null,
+      _ownTime: ownTime,
+      // An off-screen placeholder WhatsApp has not filled in yet: nothing to export.
+      _hollow: Boolean(messageId) && !pre && !bodyText && !media && !quote && !deleted && !reactions.length,
     };
   }
 
@@ -1443,6 +1530,8 @@
     for (var c = 0; c < candidates.length; c++) {
       ctx.index = c;
       var parsed = parseRow(candidates[c], ctx);
+      // Unfilled placeholders: loadAllHistory reports the ones never resolved.
+      if (parsed && parsed._hollow) continue;
       if (parsed) {
         if (parsed.timestamp) ctx.lastTimestamp = parsed.timestamp;
         messages.push(parsed);

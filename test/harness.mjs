@@ -321,6 +321,7 @@ export function fastHistoryLimits(window) {
   limits.growthTimeoutMs = 60;
   limits.growthHardCapMs = 120;
   limits.topIdleRounds = 1;
+  limits.hydrateTimeoutMs = 40;
   limits.activityQuietMs = 20;
   limits.pollMs = 10;
   limits.settleAfterLoadMs = 0;
