@@ -270,7 +270,10 @@
     var mediaData = get(msg, 'mediaData');
     var mediaBlob = mediaData ? get(mediaData, 'mediaBlob') : null;
     if (!mediaBlob) {
-      note.found = 'no mediaBlob';
+      // Stickers (and some cached media) are rendered from a blob: URL with no mediaBlob.
+      var rendered = mediaData ? await blobFromUrl(get(mediaData, 'renderableUrl')) : null;
+      if (rendered) return rendered;
+      note.found = 'no mediaBlob' + (mediaData && get(mediaData, 'renderableUrl') ? ', url unreadable' : ', no url');
       return null;
     }
     if (isBlob(mediaBlob)) return mediaBlob;
@@ -289,17 +292,28 @@
     }
     if (isBlob(mediaBlob.blob)) return mediaBlob.blob;
     // Last resort: the object URL WhatsApp renders the media from (local to this page).
+    var url = null;
     try {
-      var url = typeof mediaBlob.url === 'function' ? mediaBlob.url() : get(mediaData, 'renderableUrl');
-      if (typeof url === 'string' && /^blob:/.test(url)) {
-        var response = await window.fetch(url);
-        var fetched = await response.blob();
-        if (isBlob(fetched)) return fetched;
-      }
+      url = typeof mediaBlob.url === 'function' ? mediaBlob.url() : null;
     } catch (err) {
-      note.found = (note.found ? note.found + '; ' : '') + 'blob url unreadable';
+      url = null;
     }
+    var fromUrl = await blobFromUrl(url || get(mediaData, 'renderableUrl'));
+    if (fromUrl) return fromUrl;
+    note.found = (note.found ? note.found + '; ' : '') + 'blob url unreadable';
     return null;
+  }
+
+  /** Read a blob: URL WhatsApp created in this page. Never anything else. */
+  async function blobFromUrl(url) {
+    if (typeof url !== 'string' || !/^blob:/.test(url)) return null;
+    try {
+      var response = await window.fetch(url);
+      var fetched = await response.blob();
+      return isBlob(fetched) ? fetched : null;
+    } catch (err) {
+      return null;
+    }
   }
 
   function stageOf(msg) {
