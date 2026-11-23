@@ -268,7 +268,10 @@
    */
   async function blobOf(msg, note) {
     var mediaData = get(msg, 'mediaData');
-    var mediaBlob = mediaData ? get(mediaData, 'mediaBlob') : null;
+    // Live (2026-11): downloaded images, stickers and documents sit on the message's
+    // mediaObject; only videos had theirs on mediaData. Check both.
+    var mediaObject = get(msg, 'mediaObject');
+    var mediaBlob = (mediaObject && get(mediaObject, 'mediaBlob')) || (mediaData ? get(mediaData, 'mediaBlob') : null);
     if (!mediaBlob) {
       // Stickers (and some cached media) are rendered from a blob: URL with no mediaBlob.
       var rendered = mediaData ? await blobFromUrl(get(mediaData, 'renderableUrl')) : null;
@@ -407,8 +410,9 @@
           deadline = Math.max(deadline, Date.now() + waitMs);
         }
         blob = await blobOf(msg, note);
-        if (!blob) await sleep(250);
+        if (!blob) await sleep(Math.min(250, Math.max(20, Math.round(waitMs / 10))));
       }
+      if (!blob) blob = await blobOf(msg, note); // it may have landed during the last wait
       delete downloads[id]; // finished either way; a later export may try again
       if (!blob) {
         var why = entry.failed

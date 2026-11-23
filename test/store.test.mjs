@@ -82,6 +82,7 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
     if (!m.__x_mediaKey) continue;
     const n = Number(m.__x_id.id.slice(1));
     m.__x_mediaData = new Model({ mediaStage: n === 4 ? 'RESOLVED' : 'INIT', mediaBlob: n === 4 ? blobFor(n) : null });
+    m.__x_mediaObject = { mediaBlob: null };
     m.forceDownloadMediaEvenIfExpensive = async () => {
       downloads.push(n);
       if (n === 8 || allStuck) {
@@ -89,8 +90,20 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
         m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
         return new Promise(() => {});
       }
+      if (n === 6) {
+        // Expired on the server: the phone re-sends it, slower than the base time limit,
+        // but each stage change shows progress.
+        m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
+        setTimeout(() => (m.__x_mediaData.__x_mediaStage = 'REUPLOADING'), 150);
+        setTimeout(() => {
+          m.__x_mediaData.__x_mediaStage = 'RESOLVED';
+          m.__x_mediaObject.mediaBlob = blobFor(n);
+        }, 330);
+        return;
+      }
+      // Live: the downloaded file is on the message's mediaObject, not on mediaData.
       m.__x_mediaData.__x_mediaStage = 'RESOLVED';
-      m.__x_mediaData.__x_mediaBlob = blobFor(n);
+      m.__x_mediaObject.mediaBlob = blobFor(n);
     };
   }
 
