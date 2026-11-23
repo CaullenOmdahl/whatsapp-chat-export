@@ -325,7 +325,7 @@
         reject(new Error('The scripting permission is unavailable.'));
         return;
       }
-      try {
+      function injectIsolated() {
         chrome.scripting.executeScript(
           { target: { tabId: tabId }, files: WAEx.CONTENT_FILES },
           function () {
@@ -336,8 +336,27 @@
             resolve();
           }
         );
+      }
+      try {
+        // The page bridge first, in WhatsApp's own world. Best effort: without it the
+        // export falls back to reading the screen.
+        chrome.scripting.executeScript(
+          { target: { tabId: tabId }, files: WAEx.PAGE_FILES || [], world: 'MAIN' },
+          function () {
+            void chrome.runtime.lastError;
+            try {
+              injectIsolated();
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
       } catch (err) {
-        reject(err);
+        try {
+          injectIsolated();
+        } catch (inner) {
+          reject(inner);
+        }
       }
     });
   }
@@ -531,7 +550,7 @@
         el('span', { text: 'Files are created on your device. Nothing is uploaded.' }),
       ]),
       el('div', { className: 'footer-row' }, [
-        el('span', { className: 'privacy-sub', text: 'No network · No analytics' }),
+        el('span', { className: 'privacy-sub', text: 'Nothing uploaded · No analytics' }),
         dom.footerDiagButton,
       ]),
     ]);

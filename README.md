@@ -7,8 +7,8 @@
 <p align="center">
   <b>WhatsApp Web has no save button. This is the save button.</b><br>
   Turn the conversation you have open into an HTML transcript, plain text, structured JSON
-  or a spreadsheet-ready CSV — with its photos and documents — without a single byte leaving
-  your browser.
+  or a spreadsheet-ready CSV — with its photos and documents — and nothing uploaded
+  anywhere.
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
   <a href="https://github.com/CaullenOmdahl/whatsapp-chat-export/releases"><img src="https://img.shields.io/github/v/release/CaullenOmdahl/whatsapp-chat-export?color=00a884&label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/license-MIT-00a884" alt="MIT license">
   <img src="https://img.shields.io/badge/manifest-v3-00a884" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/network-none-00a884" alt="No network access">
+  <img src="https://img.shields.io/badge/uploads-none-00a884" alt="Nothing is uploaded">
 </p>
 
 <p align="center">
@@ -31,8 +31,8 @@ Your phone can export a chat. WhatsApp Web cannot. If the conversation lives on 
 work threads, a project group, a family chat you want to keep — there is no button that says
 "save this", and no official way to get a readable file out of it.
 
-This extension is that button. It reads the conversation you already have open, scrolls back
-through its history for you, and writes a clean file to your downloads folder. No account, no
+This extension is that button. It reads the conversation you already have open, loads its
+older history for you, and writes a clean file to your downloads folder. No account, no
 server, no upload, no telemetry, no "sign in with Google". The chat stays between you and your
 disk.
 
@@ -80,9 +80,12 @@ WhatsApp Chat with Design Team - 2026-11-18.zip
     └── 0003-Q4-plan.pdf
 ```
 
-WhatsApp only exposes media that has been rendered on screen, so anything never loaded in the
-chat is exported as a clearly marked placeholder instead of being silently dropped. The
-extension tells you how many items were captured and how many were missing.
+With the Media option set to *Download*, every photo, video, voice note, sticker and document in
+the exported range is downloaded through WhatsApp's own download manager, the same way WhatsApp
+fetches a photo when you open it, including media you never opened. Anything WhatsApp can no
+longer download (for example, media that has expired on its servers) is exported as a clearly
+marked placeholder instead of being silently dropped. The extension tells you how many items were
+captured and how many were missing.
 
 ---
 
@@ -132,7 +135,7 @@ quoted_author, quoted_text, reactions, media_kind, media_file, media_missing, me
 ```json
 {
   "schema": "chat-export/v1",
-  "generator": "Chat Export for WhatsApp 1.0.4",
+  "generator": "Chat Export for WhatsApp 1.1.0",
   "exportedAt": "2026-11-18T02:30:00.000Z",
   "chat": { "name": "Design Team", "isGroup": true },
   "settings": { "format": "json", "mediaMode": "link", "includeSystem": false,
@@ -196,7 +199,7 @@ cd whatsapp-chat-export
 Updating later: replace the folder contents (or load the newer release) and press the reload icon
 on the extension's card, then reload the WhatsApp tab.
 
-> **Requirements:** Chrome 102+ or a Chromium browser with equivalent Manifest V3 support
+> **Requirements:** Chrome 111+ or a Chromium browser with equivalent Manifest V3 support
 > (current Edge, Brave, Arc). A working WhatsApp Web session and the chat open in the active tab.
 > There is no build step and no runtime dependency — the extension is plain JavaScript.
 > Node.js 22+ is only needed to run the tests and build the release zip.
@@ -210,7 +213,7 @@ on the extension's card, then reload the WhatsApp tab.
 2. Pick a format, a date range and how to handle media.
 3. Press **Export chat**.
 
-The popup shows live progress while it scrolls back through the conversation
+The popup shows live progress while it loads the conversation's history
 (`Loading older messages… 1,240 so far`). **You can close the popup** — the export keeps running
 in the WhatsApp tab, and reopening shows the progress again — but keep the WhatsApp tab itself
 open and in the foreground.
@@ -222,17 +225,17 @@ doing in WhatsApp — it restores your scroll position when it is done.
 
 ### How far back does it go?
 
-**As far as WhatsApp has.** With the date range set to *All time* it keeps loading pages until it
-reaches the first message in the conversation. Pick *Last 30 days* (or a custom range) and it stops
+**As far as WhatsApp has.** With the date range set to *All time* it asks WhatsApp to keep loading
+earlier messages until WhatsApp reports there are none left. Pick *Last 30 days* (or a custom range) and it stops
 as soon as the start of that range is covered — which is the fast way to export a slice of a very
 long chat.
 
-It works from wherever the chat happens to be scrolled: WhatsApp restores your last position, so
-the export first walks back to the oldest message and then forward to the newest one if it did not
-start there. You do not need to scroll to the bottom first.
+It works from wherever the chat happens to be scrolled; you do not need to scroll to the bottom
+first. If the screen-reading fallback is in use (see [How it works](#how-it-works)), it walks back
+to the oldest message and then forward to the newest one.
 
-Safety stops exist so a runaway loop cannot wedge the tab: 4,000 scroll rounds, a 10-minute
-budget, or 150,000 messages. If one is hit, the export completes and says so in the warnings
+Safety stops exist so a runaway loop cannot wedge the tab: a round limit, a 10-minute budget, or
+150,000 messages. If one is hit, the export completes and says so in the warnings
 instead of pretending it got everything.
 
 ---
@@ -256,15 +259,21 @@ Settings are remembered in `chrome.storage.local`. Nothing is synced anywhere.
 
 ## Privacy
 
-**The extension has no network code.** Not "we promise not to"; there is no `fetch` for anything
-except `blob:`/`data:` URLs that already exist inside the WhatsApp page (that is how media is
-captured), and a test fails the build if that changes. No analytics, no error reporting, no remote
-config, no remote code.
+**Nothing is uploaded anywhere.** The extension's own code makes no network requests: there is no
+`fetch` for anything except `blob:`/`data:` URLs, no XHR, no WebSocket and no remote URLs, and the
+lint step fails the build if that changes. No analytics, no error reporting, no remote config, no
+remote code, no accounts, no servers.
+
+One thing does touch the network: with Media set to *Download*, the extension asks WhatsApp's own
+code to download each photo, video, voice note, sticker and document in the exported range, from
+WhatsApp's media servers. That is the same request WhatsApp makes when you open a photo. With
+*Placeholders* or *None*, no media is downloaded. Nothing is ever sent to the extension's authors
+or to any third party.
 
 | Permission | Why it is needed |
 | --- | --- |
 | `storage` | Remember your options and the list of recent exports. |
-| `scripting` | Re-inject the content script if the popup opens before the page finished loading. |
+| `scripting` | Re-inject the content script, and inject the page bridge into an already-open WhatsApp tab, if the popup opens before the page finished loading. |
 | `activeTab` | Talk to the WhatsApp tab you are looking at, only after you click. |
 | `https://web.whatsapp.com/*` | Read the conversation panel. That is the entire surface area. |
 
@@ -280,20 +289,34 @@ test suite.
 ## How it works
 
 - **A content script runs inside the WhatsApp Web tab**, only on `https://web.whatsapp.com/*`, and
-  only after you ask it to. It reads the already-rendered page; it has no network access.
-- **The conversation is scraped structurally, not by class name.** WhatsApp rotates obfuscated
-  class names constantly, so the scraper keys off stable facts: `#main`, the `data-id` on each
+  only after you ask it to. Its own code makes no network requests.
+- **Messages are read from WhatsApp's own message store.** A small script, `src/page/bridge.js`,
+  runs in WhatsApp Web's own page JavaScript world (a content script with `"world": "MAIN"`). It
+  reads the in-memory store for the open chat and returns every loaded message as structured data:
+  exact time, sender, whether you sent it, type, full text, caption, quoted message, reactions,
+  each album photo as its own message, deleted messages and calls. It is read-only: it never
+  sends, edits, deletes or marks messages. The extension's content script talks to it over
+  `window.postMessage`.
+- **Older history is requested from WhatsApp.** The extension asks WhatsApp to load earlier
+  messages with its own loader (or, if that is not found, scrolls the message list to the top)
+  until WhatsApp reports there are no earlier messages, the start of your date range is reached,
+  or a limit is hit.
+- **Media is downloaded by WhatsApp.** With Media set to *Download*, WhatsApp's own download
+  manager fetches and decrypts each item in the range.
+- **If WhatsApp's internals cannot be reached, it falls back to reading the screen.** WhatsApp
+  renames its internals between releases. When that happens the export scrolls the message list and
+  reads the rendered page instead, and says so in a warning. That method is slower and can miss
+  messages and media: only media that was rendered on screen can be captured that way.
+- **The screen-reading fallback scrapes structurally, not by class name.** WhatsApp rotates
+  obfuscated class names constantly, so it keys off stable facts: `#main`, the `data-id` on each
   message row, the `data-pre-plain-text` timestamp/author attribute, and `.selectable-text`
   bodies. Every lookup has a fallback chain, and a miss becomes a warning rather than a failed
-  export.
-- **History is loaded in two passes.** First it scrolls to the top so WhatsApp fetches older
-  pages, until it reaches the first message (or the start of your date range). Then it walks back
-  down a screen at a time. WhatsApp only fills in the messages that are on screen — the rest are
-  empty placeholders — so the walk gives each screen a moment to fill in and reads it then.
-  Messages are kept as they are read, so ones WhatsApp removes from the page later still reach the
-  file, and any that never filled in are counted in a warning instead of exported blank.
-- **Timestamps are parsed per locale.** WhatsApp renders dates differently in every language, and
-  the day/month order is inferred from the conversation itself, not assumed.
+  export. It scrolls to the top so WhatsApp loads older pages, then walks back down a screen at a
+  time, because WhatsApp only fills in the messages that are on screen. Messages are kept as they
+  are read, and any that never filled in are counted in a warning instead of exported blank.
+- **Fallback timestamps are parsed per locale.** The rendered page shows dates differently in every
+  language, and the day/month order is inferred from the conversation itself, not assumed. The
+  store path has exact times and needs none of this.
 - **Everything is normalised into one message model** (author, direction, type, text, quote,
   reactions, media), so all four formats come from a single parse.
 - **Files are built in the browser** as a `Blob` and saved through an object URL. The ZIP container
@@ -310,8 +333,11 @@ More detail, including the selector strategy and failure modes, is in
 - **Only what WhatsApp Web has.** The extension reads the conversation as WhatsApp Web shows it.
   If WhatsApp Web does not have the older history (it may offer to load it from your phone), the
   export cannot include it.
-- **Media must have been on screen.** Photos and files are only captured if WhatsApp has loaded
-  them in the page; the rest become marked placeholders.
+- **Media WhatsApp can no longer download is marked as not loaded.** For example, media that has
+  expired on WhatsApp's servers. There is one warning per kind of media.
+- **WhatsApp's internals are undocumented and change.** The primary path depends on them. When
+  they cannot be reached, the slower screen-reading fallback is used and the export says so in a
+  warning; that method can miss messages and media.
 - **Keep the tab in the foreground.** Browsers throttle background tabs, which slows WhatsApp's
   loading and can leave messages unread; any that are missed are counted in a warning.
 - **WhatsApp changes its page without notice.** When it does, exports can come out short or
@@ -344,10 +370,12 @@ Your browser's normal Downloads folder. Nothing is uploaded anywhere.
 <details>
 <summary><b>Why are some photos missing from the archive?</b></summary>
 
-WhatsApp only keeps a downloadable copy of media that has been rendered on screen. A photo you
-have never scrolled past has no bytes in the page, so it cannot be captured. It is exported as a
-placeholder marked *not loaded in WhatsApp*. Scroll through the chat once before exporting if you
-need those files.
+First check that Media is set to *Download*; with *Placeholders* or *None* no media is saved. With
+*Download*, WhatsApp's own download manager fetches every photo in the range, including ones you
+never opened. A photo is exported as a placeholder marked *not loaded in WhatsApp* when WhatsApp
+can no longer download it (for example, it expired on WhatsApp's servers), or when the export fell
+back to reading the screen, which can only capture media that was rendered on screen. The warnings
+in the result panel say which case applies.
 </details>
 
 <details>
@@ -398,14 +426,14 @@ No bundler, no framework, no runtime dependencies: classic scripts on one `WAEx`
 
 ```bash
 npm ci                # install the one dev dependency
-npm test              # 7 suites
-npm run lint          # permissions, no-network, no-innerHTML, manifest contract, version sync
+npm test              # 8 suites
+npm run lint          # permissions, no-fetch/XHR/WebSocket, no-innerHTML, manifest contract, version sync
 npm run build         # dist/whatsapp-chat-export-v<version>.zip, ready for the Web Store
 ```
 
 | Script | What it does |
 | --- | --- |
-| `npm run test:<suite>` | Run one suite (`manifest`, `datetime`, `formats`, `zip`, `extractor`, `e2e`, `popup`) |
+| `npm run test:<suite>` | Run one suite (`manifest`, `datetime`, `formats`, `zip`, `extractor`, `e2e`, `popup`, `store`) |
 | `npm run screenshots` | Regenerate the popup screenshots in `test/screenshots/` |
 | `npm run store-shots` | Regenerate the 1280×800 Web Store artwork in `docs/store/` |
 | `npm run examples` | Regenerate the sample exports in `docs/examples/` |
@@ -415,7 +443,8 @@ npm run build         # dist/whatsapp-chat-export-v<version>.zip, ready for the 
 **What the tests cover:** locale-tolerant date parsing, all four writers (including HTML escaping
 and CSV quoting), the hand-written ZIP container (validated with Python's `zipfile`), the scraper
 against a simulated WhatsApp DOM, an end-to-end export whose downloaded file is opened and checked,
-the real popup wired to the real content script, and the manifest/packaging rules. CI runs the
+the real popup wired to the real content script, the message-store path against a simulated
+WhatsApp store, and the manifest/packaging rules. CI runs the
 suite on Node 22 and 24, builds the store zip, and tags publish a release automatically.
 
 Contributor docs: [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
@@ -426,7 +455,7 @@ Contributor docs: [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/ARCHITECTURE.md](d
 
 ## Contributing, security and support
 
-- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, the ground rules (no network,
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, the ground rules (no network requests from the extension's own code,
   no new permissions, no `innerHTML` with user content), and what is most useful in a pull request.
 - **Questions and ideas:** [GitHub Discussions](https://github.com/CaullenOmdahl/whatsapp-chat-export/discussions).
 - **Bugs:** use the issue form and paste the Diagnostics report — it contains selector match counts,

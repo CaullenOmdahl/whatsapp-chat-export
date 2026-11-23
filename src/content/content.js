@@ -19,6 +19,7 @@
   var media = WAEx.media;
   var dt = WAEx.datetime;
   var zip = WAEx.zip;
+  var internal = WAEx.internal;
   var T = WAEx.MESSAGE_TYPES;
   var PHASE = WAEx.PHASE;
 
@@ -189,6 +190,41 @@
 
   /* ---------------------------------------------------------------- export */
 
+  /** Load history and read every message from WhatsApp's store via the page bridge. */
+  async function exportFromStore(storeInfo, bounds, settings) {
+    var warnings = [];
+    setPhase(PHASE.SCROLLING, 'Loading older messages', { loaded: storeInfo.loaded, percent: null });
+    var loaded = await internal.loadHistory({
+      dateBounds: bounds,
+      canLoadEarlier: storeInfo.canLoadEarlier,
+      shouldCancel: function () {
+        return cancelRequested;
+      },
+      onProgress: function (progress) {
+        var percent = null;
+        var end = bounds.end || Date.now();
+        if (bounds.start && progress.oldest !== null && end > bounds.start) {
+          percent = Math.max(3, Math.min(96, Math.round(((end - progress.oldest) / (end - bounds.start)) * 100)));
+        }
+        reportProgress({ loaded: progress.loaded, percent: percent, detail: 'Loading older messages' });
+      },
+    });
+    warnings = warnings.concat(loaded.warnings);
+    if (cancelRequested) throw cancelledError();
+
+    setPhase(PHASE.PARSING, 'Reading messages', { loaded: loaded.loaded, percent: bounds.start ? 97 : null });
+    var read = await internal.readMessages();
+    warnings = warnings.concat(read.warnings);
+    var messages = read.messages;
+    if (!messages.length) throw new Error('the message list was empty');
+    if (!settings.includeReactions) {
+      messages.forEach(function (m) {
+        m.reactions = [];
+      });
+    }
+    return { messages: messages, warnings: warnings, chatName: read.chatName, isGroup: read.isGroup };
+  }
+
   async function runExport(rawSettings) {
     if (running) {
       throw new extractor.ExportError(
@@ -233,65 +269,90 @@
 
       setPhase(PHASE.SCROLLING, 'Loading older messages', { loaded: 0, percent: bounds.start ? 2 : null });
 
-      // ---- phase 1: load history -------------------------------------------------
-      history = await extractor.loadAllHistory({
-        dateBounds: bounds,
-        includeReactions: settings.includeReactions,
-        shouldCancel: function () {
-          return cancelRequested;
-        },
-        onProgress: function (progress) {
-          var percent = null;
-          var end = bounds.end || Date.now();
-
-          if (bounds.start && bounds.end) {
-            // Both ends known: progress from the oldest loaded message to the range end.
-            if (progress.newest !== null && bounds.end > bounds.start) {
-              var coveredBoth = (progress.newest - bounds.start) / (bounds.end - bounds.start);
-              percent = Math.max(3, Math.min(96, Math.round(coveredBoth * 100)));
-            }
-          } else if (bounds.start) {
-            if (progress.oldest !== null && end > bounds.start) {
-              var covered = (end - progress.oldest) / (end - bounds.start);
-              percent = Math.max(3, Math.min(96, Math.round(covered * 100)));
-            }
-          }
-
-          var detail = 'Scrolling back through history';
-          if (progress.direction === 'down') {
-            detail = 'Catching up to the newest message';
-          } else if (progress.atTop) {
-            detail = 'Reached the oldest message';
-          }
-
-          reportProgress({
-            loaded: progress.loaded,
-            percent: percent,
-            detail: detail,
-          });
-        },
-      });
-
-      warnings = warnings.concat(history.warnings || []);
+      // ---- phase 1: read WhatsApp's message store (primary) ----------------------
+      var messages = null;
+      var usedStore = false;
+      var storeInfo = await internal.probe();
+      if (storeInfo) {
+        try {
+          var storeResult = await exportFromStore(storeInfo, bounds, settings);
+          messages = storeResult.messages;
+          warnings = warnings.concat(storeResult.warnings);
+          if (storeResult.chatName) chatInfo.name = storeResult.chatName;
+          usedStore = true;
+        } catch (err) {
+          if (cancelRequested) throw cancelledError();
+          warnings.push(
+            "Could not read WhatsApp's message list directly (" +
+              (err && err.message ? err.message : err) +
+              '), so the conversation was read from the screen instead. That is slower and can miss messages.'
+          );
+        }
+      }
       if (cancelRequested) throw cancelledError();
 
-      // ---- phase 2: parse --------------------------------------------------------
-      setPhase(PHASE.PARSING, 'Reading messages', {
-        loaded: history.loaded,
-        percent: bounds.start ? 97 : null,
-      });
-
-      // loadAllHistory parsed every message it saw while scrolling, so messages that
-      // WhatsApp removed from the DOM afterwards are still in the export.
-      var messages = Array.isArray(history.messages) ? history.messages.slice() : null;
+      // ---- fallback: scroll and read the rendered page ---------------------------
       if (!messages) {
-        var parsed = extractor.parseMessages({
-          main: history.main,
-          harvested: history.seen,
+        // ---- phase 1: load history -------------------------------------------------
+        history = await extractor.loadAllHistory({
+          dateBounds: bounds,
           includeReactions: settings.includeReactions,
+          shouldCancel: function () {
+            return cancelRequested;
+          },
+          onProgress: function (progress) {
+            var percent = null;
+            var end = bounds.end || Date.now();
+
+            if (bounds.start && bounds.end) {
+              // Both ends known: progress from the oldest loaded message to the range end.
+              if (progress.newest !== null && bounds.end > bounds.start) {
+                var coveredBoth = (progress.newest - bounds.start) / (bounds.end - bounds.start);
+                percent = Math.max(3, Math.min(96, Math.round(coveredBoth * 100)));
+              }
+            } else if (bounds.start) {
+              if (progress.oldest !== null && end > bounds.start) {
+                var covered = (end - progress.oldest) / (end - bounds.start);
+                percent = Math.max(3, Math.min(96, Math.round(covered * 100)));
+              }
+            }
+
+            var detail = 'Scrolling back through history';
+            if (progress.direction === 'down') {
+              detail = 'Catching up to the newest message';
+            } else if (progress.atTop) {
+              detail = 'Reached the oldest message';
+            }
+
+            reportProgress({
+              loaded: progress.loaded,
+              percent: percent,
+              detail: detail,
+            });
+          },
         });
-        warnings = warnings.concat(parsed.warnings || []);
-        messages = parsed.messages;
+
+        warnings = warnings.concat(history.warnings || []);
+        if (cancelRequested) throw cancelledError();
+
+        // ---- phase 2: parse --------------------------------------------------------
+        setPhase(PHASE.PARSING, 'Reading messages', {
+          loaded: history.loaded,
+          percent: bounds.start ? 97 : null,
+        });
+
+        // loadAllHistory parsed every message it saw while scrolling, so messages that
+        // WhatsApp removed from the DOM afterwards are still in the export.
+        messages = Array.isArray(history.messages) ? history.messages.slice() : null;
+        if (!messages) {
+          var parsed = extractor.parseMessages({
+            main: history.main,
+            harvested: history.seen,
+            includeReactions: settings.includeReactions,
+          });
+          warnings = warnings.concat(parsed.warnings || []);
+          messages = parsed.messages;
+        }
       }
 
       // System messages are collected always; the option only decides whether they ship.
@@ -322,6 +383,7 @@
       if (settings.mediaMode === 'download') {
         var collector = media.createCollector({
           maxBytes: Math.max(1, settings.maxMediaMb) * 1024 * 1024,
+          readInternal: usedStore ? internal.readMedia : null,
           shouldCancel: function () {
             return cancelRequested;
           },

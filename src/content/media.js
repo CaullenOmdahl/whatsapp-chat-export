@@ -5,9 +5,13 @@
  * message is mounted. Capturing therefore has to happen from the live page, before
  * the conversation is scrolled back and WhatsApp reclaims the object URLs.
  *
- * Only already-rendered media can be captured. A photo the user has never opened in
- * the chat has no blob URL at all, so it is reported as missing rather than silently
- * omitted.
+ * Only already-rendered media can be captured that way. A photo the user has never
+ * opened in the chat has no blob URL at all, so it is reported as missing rather than
+ * silently omitted.
+ *
+ * Messages read from WhatsApp's store (internal.js) carry a `wax-msg:<id>` URL
+ * instead: their media is downloaded and decrypted by WhatsApp's own download manager
+ * through the page bridge (`readInternal`), whether or not it was ever opened.
  */
 (function (global) {
   'use strict';
@@ -78,6 +82,7 @@
    *
    * options:
    *   maxBytes   hard ceiling for captured media (bytes)
+   *   readInternal  (id) => Promise<{ buffer, mimetype }> for `wax-msg:` URLs
    *   shouldCancel  () => boolean
    *   onProgress    ({ attempted, captured, bytes, skipped }) => void
    */
@@ -88,6 +93,7 @@
     var shouldCancel = typeof opts.shouldCancel === 'function' ? opts.shouldCancel : function () {
       return false;
     };
+    var readInternal = typeof opts.readInternal === 'function' ? opts.readInternal : null;
 
     var pending = [];
     var entries = [];
@@ -107,7 +113,13 @@
         skipped++;
         return;
       }
-      if (!/^(blob|data):/.test(String(media.url))) {
+      var internal = /^wax-msg:/.test(String(media.url));
+      if (internal && !readInternal) {
+        media.missing = true;
+        skipped++;
+        return;
+      }
+      if (!internal && !/^(blob|data):/.test(String(media.url))) {
         media.missing = true;
         skipped++;
         return;
@@ -126,16 +138,23 @@
 
       var blob;
       try {
-        var response = await fetch(job.url);
-        if (!response.ok && response.status !== 0) {
-          throw new Error('HTTP ' + response.status);
+        if (/^wax-msg:/.test(job.url)) {
+          var internalResult = await readInternal(job.url.slice('wax-msg:'.length));
+          blob = new Blob([internalResult.buffer], {
+            type: internalResult.mimetype || media.mime || MIME_BY_KIND[media.kind] || '',
+          });
+        } else {
+          var response = await fetch(job.url);
+          if (!response.ok && response.status !== 0) {
+            throw new Error('HTTP ' + response.status);
+          }
+          blob = await response.blob();
         }
-        blob = await response.blob();
       } catch (err) {
         media.missing = true;
         skipped++;
         // One warning per kind, not per file: a chat can have dozens of these.
-        var kind = media.kind || 'media';
+        var kind = (media.kind || 'media') + (/^wax-msg:/.test(job.url) ? ':download' : '');
         var failure = failures[kind] || (failures[kind] = { count: 0, reason: '' });
         failure.count++;
         if (!failure.reason) failure.reason = err && err.message ? err.message : 'unknown error';
@@ -216,17 +235,16 @@
       for (var w = 0; w < count; w++) workers.push(worker());
       await Promise.all(workers);
 
-      Object.keys(failures).forEach(function (kind) {
-        var failure = failures[kind];
+      Object.keys(failures).forEach(function (key) {
+        var failure = failures[key];
+        var kind = key.replace(/:download$/, '');
+        var one = failure.count === 1;
+        var what = one ? 'one ' + kind + ' file' : failure.count + ' ' + kind + ' files';
+        var cause = /:download$/.test(key)
+          ? 'WhatsApp could not download ' + (one ? 'it' : 'them') + ' (' + failure.reason + ')'
+          : 'WhatsApp had probably already released ' + (one ? 'it' : 'them') + ' (' + failure.reason + ')';
         warnings.push(
-          'Could not read ' +
-            (failure.count === 1 ? 'one ' + kind + ' file' : failure.count + ' ' + kind + ' files') +
-            ' (' +
-            failure.reason +
-            '). WhatsApp had probably already released ' +
-            (failure.count === 1 ? 'it' : 'them') +
-            '; ' +
-            (failure.count === 1 ? 'it is' : 'they are') +
+          'Could not save ' + what + ': ' + cause + '. ' + (one ? 'It is' : 'They are') +
             ' marked as not loaded in the export.'
         );
       });

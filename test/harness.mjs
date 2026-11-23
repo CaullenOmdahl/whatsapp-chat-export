@@ -19,7 +19,13 @@ export const LIB_FILES = [
   'src/lib/formats.js',
 ];
 
-export const CONTENT_FILES = [...LIB_FILES, 'src/content/extractor.js', 'src/content/media.js'];
+export const CONTENT_FILES = [
+  ...LIB_FILES,
+  'src/content/extractor.js',
+  'src/content/media.js',
+  'src/content/page-bridge.js',
+  'src/content/internal.js',
+];
 
 let failures = 0;
 let checks = 0;

@@ -259,6 +259,9 @@ try {
                 renderedRows: report.renderedRows,
                 scrollContainer: report.scrollContainer,
                 warnings: report.warnings,
+                // Set by src/page/bridge.js from WhatsApp's own page world.
+                bridge: document.documentElement.getAttribute('data-wax-bridge'),
+                bridgeApi: Boolean(WAEx.pageBridge && WAEx.internal),
               };
             } catch (err) {
               return { ok: false, error: String(err && err.message ? err.message : err) };
@@ -274,6 +277,11 @@ try {
         Boolean(result.version),
         'content-script modules all loaded',
         'version ' + (result.version || 'unknown')
+      );
+      pass(
+        Boolean(result.bridge) && result.bridgeApi === true,
+        'page bridge installed in the WhatsApp page world',
+        result.bridge ? 'version ' + result.bridge : 'data-wax-bridge missing'
       );
       console.log(
         '    chat found: ' +

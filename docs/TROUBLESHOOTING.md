@@ -111,7 +111,15 @@ This is the `NO_MESSAGES` error, meaning the filters removed everything:
 
 ### The export stopped early
 
-The result panel and its warnings list say why. Current versions have these safety caps:
+The result panel and its warnings list say why.
+
+Normally (since 1.1.0) the extension asks WhatsApp for earlier messages until WhatsApp reports the
+start of the chat, with a **10-minute** budget. It stops early only if WhatsApp stops returning
+older messages (the warning says so; WhatsApp may offer to load older messages from your phone) or
+the start of your date range is reached.
+
+The rest of this section describes the **screen-reading fallback**, used only when the warning says
+the conversation "was read from the screen instead". That method has these safety caps:
 
 - **4000 scroll rounds**,
 - a **10-minute** time budget, and
@@ -141,6 +149,15 @@ scrolled, so a long chat takes time. While it runs, the progress line counts mes
 loaded (`Loading older messages… 1,240 so far`). Keep the WhatsApp tab in the foreground for the
 duration; you can press **Cancel** at any point and nothing is saved.
 
+### A warning says the conversation "was read from the screen instead"
+
+The export normally reads WhatsApp's own message store. This warning means WhatsApp's internals
+could not be reached (WhatsApp renames them between releases), so the slower screen-reading method
+was used instead, which can miss messages and media. Update the extension first. If it persists,
+paste [`scripts/wa-internals-probe.js`](../scripts/wa-internals-probe.js) into DevTools on the
+WhatsApp tab and attach the `wa-internals-<time>.json` it saves to Downloads to a bug report. It is
+read-only and contains only names, types, booleans and counts, no message content.
+
 For a deeper look at what WhatsApp is rendering, paste [`scripts/wa-probe.js`](../scripts/wa-probe.js)
 into DevTools on the WhatsApp tab. It scrolls through the loaded part of the open chat and saves a
 structure-only report (`wa-probe-<time>.json`, no message text, names, numbers or ids) to your
@@ -160,24 +177,26 @@ first message exported only the opening page (fixed in 1.0.2). 1.0.0–1.0.2 did
 message ids current WhatsApp Web builds use, so every export held only the screenful of messages
 visible when loading finished, and a page that took more than about a second to arrive could end
 loading early (both fixed in 1.0.3). 1.0.3 then exported most messages blank — no author, text or date —
-because WhatsApp keeps off-screen messages as empty placeholders (fixed in 1.0.4). Update and
+because WhatsApp keeps off-screen messages as empty placeholders (fixed in 1.1.0). Update and
 reload the WhatsApp tab if you are on anything older.
 
 ### Media is missing from the export
 
 Expected behaviour, and documented deliberately:
 
-- WhatsApp Web only loads media that has been rendered on screen. If an item was never scrolled
-  into view or opened, its bytes do not exist in the page and **cannot** be captured. It exports as
-  a placeholder marked missing — it is not a bug.
-- Some previews exist as thumbnails without a downloadable source; those are also marked missing.
+- Media is only saved when the Media option is **Download**. With *Placeholders* or *None* nothing
+  is downloaded.
+- With *Download*, WhatsApp's own download manager fetches each photo, video, voice note, sticker
+  and document in the exported range from WhatsApp's servers, including ones you never opened. An
+  item can still be missing if WhatsApp can no longer download it (for example, it expired on
+  WhatsApp's servers). The summary has one warning per kind. That is not a bug.
+- If the export fell back to reading the screen (see above), only media that was rendered on screen
+  can be captured, so more items will be missing.
 - **Size limit** (default 250 MB, adjustable from 10 to 2048 MB while Media is set to *Download*)
   stops collection when the cap is reached. Remaining items are marked missing and the summary
   includes a cap warning.
-- To maximise captured media, use **Download** mode, start from the oldest message you need, and
-  scroll through the chat once so WhatsApp renders the media before exporting.
-
-Media is **never** fetched from WhatsApp servers; only already-loaded page data is used.
+- To maximise captured media, use **Download** mode. Nothing is uploaded anywhere; media is
+  downloaded from WhatsApp, the same way opening it in WhatsApp does.
 
 ### The download did not start, or Chrome asked to allow multiple downloads
 

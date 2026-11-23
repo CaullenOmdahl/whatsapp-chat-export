@@ -26,7 +26,7 @@ The version lives in three places and they must agree:
 ```bash
 npm ci
 npm run lint          # static rules: permissions, no network, no innerHTML, manifest contract
-npm test              # 7 suites, ~120 checks
+npm test              # 8 suites
 npm run smoke:chrome  # real Chrome: manifest loads, popup renders, content script injects
 npm run build         # dist/whatsapp-chat-export-vX.Y.Z.zip
 ```

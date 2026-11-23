@@ -700,7 +700,7 @@ await checkAsync('media that cannot be read is one warning per kind, not one per
   }
   const result = await collector.drain();
   eq(result.warnings.length, 1, JSON.stringify(result.warnings));
-  ok(/^Could not read 3 sticker files \(HTTP 404\)/.test(result.warnings[0]), result.warnings[0]);
+  ok(/^Could not save 3 sticker files: .*\(HTTP 404\)/.test(result.warnings[0]), result.warnings[0]);
 });
 
 suite('extractor: direction without .message-out (live 2026-11)');

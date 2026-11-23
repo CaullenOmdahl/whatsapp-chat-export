@@ -179,8 +179,10 @@ from the popup, and never ship UI that calls them.
 
 ## Rules
 
-- **No network.** The extension never transmits chat data. Everything stays in the tab
-  and in local storage. Do not add analytics, telemetry or remote code.
+- **No network requests from the extension's code.** The extension never transmits chat
+  data. Everything stays in the tab and in local storage. Media is downloaded only by
+  WhatsApp's own download manager via the page bridge. Do not add analytics, telemetry or
+  remote code.
 - **No `innerHTML` with message text.** User content is always written through
   `textContent` / DOM nodes, never interpolated into HTML strings.
 - **Permissions stay minimal.** `storage`, `scripting`, `activeTab` only, plus the

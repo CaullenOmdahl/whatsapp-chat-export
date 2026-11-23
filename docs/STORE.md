@@ -35,9 +35,11 @@ FOUR FORMATS
 • CSV — one row per message, opens cleanly in Excel or Google Sheets.
 
 FULL HISTORY, NOT JUST WHAT'S ON SCREEN
-WhatsApp Web only keeps a window of messages in the page. When you start an export, the
-extension scrolls up through the chat by itself, loading older messages as it goes, then builds
-the report from everything it captured.
+The extension reads the open chat from WhatsApp Web's own message store, so it gets exact times,
+senders, full text, captions, quoted messages and reactions. When you start an export, it asks
+WhatsApp to load older messages, as far back as WhatsApp Web itself can load or your chosen date
+range goes. If WhatsApp's internals cannot be reached, it falls back to scrolling and reading the
+page, and tells you so in a warning.
 
 YOUR OPTIONS
 • Date range: all time, last 7, 30 or 90 days, or a custom start–end range.
@@ -55,18 +57,21 @@ BUILT TO STAY OUT OF YOUR WAY
   its UI and the extension needs an update.
 
 PRIVATE BY DESIGN
-This extension is 100% local. No network requests, no telemetry, no account, no server, no
-cookies, no third-party services. Your conversations are read inside your own browser tab and
-written to a file on your own computer. Chat data never leaves the browser. Your settings and a
+Nothing is uploaded anywhere: no telemetry, no analytics, no account, no server, no cookies, no
+third-party services. The extension's own code makes no network requests. Your conversations are
+read inside your own browser tab and written to a file on your own computer. Your settings and a
 short local export history are the only things stored, in Chrome's local extension storage.
 
 BE HONEST ABOUT MEDIA
-WhatsApp Web loads media lazily. Media that WhatsApp has already rendered in the page can be
-saved. Media it has never loaded — items you never scrolled past or opened — cannot be captured;
-those items are clearly marked as missing in the export rather than silently dropped.
+When Media is set to Download, every photo, video, voice note, sticker and document in the
+exported range is downloaded by WhatsApp's own download manager from WhatsApp's media servers,
+the same way WhatsApp does when you open a photo, including media you never opened. Nothing is
+sent to anyone else. Media WhatsApp can no longer download (for example, expired on its servers)
+is clearly marked as not loaded in the export rather than silently dropped. With Placeholders or
+None, no media is downloaded.
 
 GOOD TO KNOW
-• Works on web.whatsapp.com in Chrome 102+ (and current Edge, Brave or Arc).
+• Works on web.whatsapp.com in Chrome 111+ (and current Edge, Brave or Arc).
 • WhatsApp Desktop and mobile apps are not supported.
 • Requires a logged-in WhatsApp Web session.
 • Very long chats are limited by how much history WhatsApp Web is willing to load.
@@ -107,7 +112,7 @@ browsing data, and it runs only on web.whatsapp.com.
 | Does it collect or use personal/sensitive user data? | **No.** Nothing is collected, transmitted or sold. |
 | Does it use cookies? | **No.** |
 | Does it use authentication information? | **No.** It relies on the existing WhatsApp Web page; it never reads or stores credentials. |
-| Does it disclose data to third parties? | **No.** There are no third parties and no network requests. |
+| Does it disclose data to third parties? | **No.** There are no third parties: nothing is sent to the developer or anyone else. The only network activity is WhatsApp's own media download, at the user's request. |
 | Certify data usage compliance | Yes — the extension does not collect data, so it complies by design. |
 
 ## Permission justifications
@@ -124,10 +129,11 @@ The store asks for a justification for each requested permission. Use these verb
 
 ### `scripting`
 
-> Required to inject the extension's own bundled content script into the active WhatsApp Web tab
-> when the user starts an export from the popup, including on tabs that were already open before
-> the extension was installed or updated. It injects only the packaged `src/content/*` files, only
-> into `https://web.whatsapp.com/*`, and only in response to a user action.
+> Required to inject the extension's own bundled content script, and its page-world bridge that
+> reads WhatsApp Web's message store, into the active WhatsApp Web tab when the user starts an
+> export from the popup, including on tabs that were already open before the extension was
+> installed or updated. It injects only packaged files (`src/content/*`, `src/page/bridge.js`),
+> only into `https://web.whatsapp.com/*`, and only in response to a user action.
 
 ### `activeTab`
 
@@ -138,9 +144,10 @@ The store asks for a justification for each requested permission. Use these verb
 ### Host permission — `https://web.whatsapp.com/*`
 
 > Required to read the conversation displayed on WhatsApp Web (message rows, sender names,
-> timestamps, media previews) and to scroll the message list in order to load older history. This
-> is the only site the extension runs on. The content is processed locally to build the export
-> file; it is never transmitted anywhere.
+> timestamps, media previews), to ask WhatsApp to load older history (or scroll the message list),
+> and to have WhatsApp's own download manager fetch media when the user chooses to download it.
+> This is the only site the extension runs on. The content is processed locally to build the
+> export file; the extension never transmits it anywhere.
 
 ## Graphics
 
@@ -166,7 +173,7 @@ screenshot):
 2. **Four formats, one conversation.** — styled HTML, plain text, structured JSON and spreadsheet-ready CSV.
 3. **Media comes along.** — photos, video, voice notes and documents bundled into one .zip with the report.
 4. **Long chats, visible progress.** — watch the history load, cancel anytime; the export keeps running if you close the popup.
-5. **Nothing leaves your browser.** — no network calls, no telemetry, and a diagnostics panel for when WhatsApp changes its page.
+5. **Nothing is uploaded.** — no telemetry, no analytics, and a diagnostics panel for when WhatsApp changes its page.
 
 Screenshot rules: never show real personal data (the generated frames use the fixture conversation
 "Design Team"), no device frames or browser chrome that imply an affiliation, no text smaller than
@@ -176,8 +183,9 @@ Screenshot rules: never show real personal data (the generated frames use the fi
 
 - The extension requires an existing WhatsApp Web login; reviewers can create a test WhatsApp
   account and log in at <https://web.whatsapp.com>.
-- No network permissions are requested, so nothing can be uploaded; local-only processing is the
-  core design constraint.
+- The extension's own code makes no network requests and nothing is uploaded; processing is local.
+  With Media set to Download, WhatsApp's own code downloads media from WhatsApp's servers at the
+  extension's request. The extension needs Chrome 111+ (page-world content script).
 - The extension does not automate WhatsApp actions (no sending, no deleting). It only reads the
   rendered conversation after the user asks for an export.
 

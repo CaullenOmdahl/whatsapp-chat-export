@@ -17,6 +17,7 @@ const FILES = [
   'test/extractor.test.mjs',
   'test/e2e.test.mjs',
   'test/popup.test.mjs',
+  'test/store.test.mjs',
 ].filter((file) => fs.existsSync(path.join(ROOT, file)));
 
 const results = [];

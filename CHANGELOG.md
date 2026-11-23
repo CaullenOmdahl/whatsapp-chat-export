@@ -4,9 +4,34 @@ All notable changes to **Chat Export for WhatsApp** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.4] — 2026-11-24
+## [1.1.0] — 2026-11-24
 
-### Fixed
+### Added
+
+- **Exports read WhatsApp's own message list instead of the screen.** A small script in
+  WhatsApp Web's page (`src/page/bridge.js`) reads the open chat's messages from WhatsApp's
+  in-memory store: exact time, sender, whether you sent it, type, full text, caption,
+  quoted message and reactions, with each album photo as its own message. Older history is
+  loaded by asking WhatsApp for earlier messages (or by scrolling to the top if its loader
+  is not found) until WhatsApp reports the start of the chat. No more scrolling through
+  every screen, and none of the screen-reading problems below.
+- **Media you never opened is downloaded.** With Media set to *Download*, every photo,
+  video, voice note, sticker and document in the export is downloaded and decrypted by
+  WhatsApp's own download manager, the same way opening it in WhatsApp does. Media
+  WhatsApp can no longer download is marked as not loaded.
+- `scripts/wa-internals-probe.js`: a read-only DevTools probe of WhatsApp's internal module
+  and field names, for when WhatsApp renames them.
+
+### Changed
+
+- If WhatsApp's internals cannot be reached, the export falls back to scrolling and reading
+  the page (the fixes below), and says so in a warning.
+- Minimum Chrome version is 111 (needed to run the page script). Permissions are unchanged.
+- The privacy wording no longer says "no network": the extension's own code still makes no
+  requests, but with Media = *Download* WhatsApp's code downloads media from WhatsApp's
+  servers. Nothing is sent to anyone else.
+
+### Fixed (screen-reading path, now the fallback)
 
 - **Messages are no longer exported blank.** WhatsApp keeps messages away from the viewport as
   empty placeholders and fills them in only when they scroll into view. 1.0.3 collected the
