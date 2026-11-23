@@ -299,4 +299,30 @@ await checkAsync('the user is identified by name and the chat is not a group', a
   direct.dom.window.close();
 });
 
+suite('e2e: re-injecting the content script');
+
+await checkAsync('a re-injected content script takes over from the previous copy', async () => {
+  // After an extension reload, the previous copy stays in the tab with a dead connection.
+  // The old "already loaded" guard made a fresh injection quit, leaving that copy in charge.
+  const page = bootPage(buildFixtureHtml());
+  const listenersBefore = page.mock.listeners.length;
+  loadScripts(page.window, [...CONTENT_FILES, 'src/content/content.js']);
+  eq(page.mock.listeners.length, listenersBefore + 1, 'the new copy registered its listener');
+  const oldListener = page.mock.listeners[0];
+  eq(oldListener({ type: 'WAX:PING' }, {}, () => {}), false, 'the old copy stands down');
+  const reply = await page.mock.dispatch({ type: 'WAX:PING' });
+  ok(reply && reply.chat && reply.chat.found, 'the new copy answers');
+  page.dom.window.close();
+});
+
+await checkAsync('a re-injection does not take over while the previous copy is exporting', async () => {
+  const page = bootPage(buildFixtureHtml());
+  page.WAEx.__contentRunning = true;
+  const listenersBefore = page.mock.listeners.length;
+  loadScripts(page.window, [...CONTENT_FILES, 'src/content/content.js']);
+  eq(page.mock.listeners.length, listenersBefore, 'no second listener during an export');
+  page.WAEx.__contentRunning = false;
+  page.dom.window.close();
+});
+
 process.exit(summary() ? 0 : 1);

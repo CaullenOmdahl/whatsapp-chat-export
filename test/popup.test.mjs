@@ -47,6 +47,7 @@ const popupListeners = [];
 const localStore = contentMock.local;
 const sessionStore = contentMock.session;
 const dispatched = [];
+const injections = [];
 
 function readStore(store, keys) {
   if (keys === null || keys === undefined) return Object.assign({}, store);
@@ -105,7 +106,8 @@ function popupChrome() {
       },
     },
     scripting: {
-      executeScript(_options, cb) {
+      executeScript(options, cb) {
+        injections.push(options);
         if (cb) cb([]);
       },
     },
@@ -337,6 +339,35 @@ await checkAsync('custom size limit is persisted and sent with the export', asyn
   const exportMessage = dispatched.filter((m) => m.type === 'WAX:EXPORT').pop();
   eq(exportMessage.settings.maxMediaMb, 120, 'export must carry the chosen limit');
   ok(contentEnv.downloads[contentEnv.downloads.length - 1].filename.endsWith('.zip'));
+});
+
+await checkAsync('refresh confirms it ran', async () => {
+  const close = popupDocument.querySelector('[aria-label="Close diagnostics"]');
+  if (close) close.click();
+  const refresh = popupDocument.querySelector('[aria-label="Refresh chat info"]');
+  ok(refresh, 'refresh button');
+  refresh.click();
+  await waitFor(() => /· Updated/.test(popupDocument.querySelector('.chat-meta')?.textContent || ''), 5000, 'Updated note');
+});
+
+await checkAsync('refresh reconnects when the tab answers without a chat', async () => {
+  // Live: "Open a chat in WhatsApp Web to get started" while a chat was open, after the
+  // extension was reloaded. The first answer says no chat; refresh re-injects, then asks again.
+  const realDispatch = contentMock.dispatch;
+  let pings = 0;
+  contentMock.dispatch = async (message) => {
+    const reply = await realDispatch(message);
+    if (message.type === 'WAX:PING' && pings++ === 0) return { ...reply, chat: { ...reply.chat, found: false, reason: 'stale' } };
+    return reply;
+  };
+  injections.length = 0;
+  await waitFor(() => !popupDocument.querySelector('[aria-label="Refresh chat info"]')?.disabled, 5000, 'refresh ready');
+  popupDocument.querySelector('[aria-label="Refresh chat info"]').click();
+  await waitFor(() => pings >= 2, 5000, 'second ping after reconnecting');
+  contentMock.dispatch = realDispatch;
+  ok(injections.some((o) => o.world === 'MAIN'), 'the page bridge was re-injected');
+  ok(injections.some((o) => !o.world && o.files.includes('src/content/content.js')), 'the content scripts were re-injected');
+  await waitFor(() => /Design Team/.test(popupDocument.querySelector('.chat-card')?.textContent || ''), 5000, 'chat shown');
 });
 
 suite('popup: degraded states');

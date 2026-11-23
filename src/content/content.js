@@ -11,7 +11,14 @@
 
   var WAEx = (global.WAEx = global.WAEx || {});
 
-  if (WAEx.__contentReady) return;
+  // The newest injection takes over. Reloading the extension leaves the previous copy of
+  // this script in the tab with a dead connection; a plain "already loaded" guard made a
+  // fresh injection quit and kept that dead copy in charge. The old copy's listener
+  // stands down once `__contentInstance` changes. An export still running in a previous
+  // copy keeps it in charge until it finishes.
+  if (WAEx.__contentRunning) return;
+  var instance = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  WAEx.__contentInstance = instance;
   WAEx.__contentReady = true;
 
   var extractor = WAEx.extractor;
@@ -236,6 +243,7 @@
 
     var settings = WAEx.normalizeSettings(rawSettings);
     running = true;
+    WAEx.__contentRunning = true;
     cancelRequested = false;
 
     lastState = createState({
@@ -541,6 +549,7 @@
       return { ok: false, error: error };
     } finally {
       running = false;
+      WAEx.__contentRunning = false;
       cancelRequested = false;
       if (settings.restoreScroll && history) {
         extractor.restoreScroll(history);
@@ -616,6 +625,7 @@
   }
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (WAEx.__contentInstance !== instance) return false; // a newer copy is in charge
     if (!message || typeof message.type !== 'string') return false;
 
     switch (message.type) {

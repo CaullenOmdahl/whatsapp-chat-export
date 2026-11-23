@@ -1065,6 +1065,9 @@
     );
   }
 
+  /** How long the card says "Updated" after a refresh. */
+  var REFRESHED_NOTE_MS = 3000;
+
   function renderChatCard() {
     clear(dom.chatCard);
     var chat = state.chat;
@@ -1080,7 +1083,9 @@
           el('p', {
             className: 'chat-empty-hint',
             // The page says why it found no chat; show it, so "I am in the chat" can be diagnosed.
-            text: chat && chat.reason ? chat.reason : 'Click any conversation, then reopen this popup.',
+            text:
+              (chat && chat.reason ? chat.reason : 'Click any conversation, then reopen this popup.') +
+              (justRefreshed() ? ' (Checked again just now.)' : ''),
           }),
         ])
       );
@@ -1100,15 +1105,20 @@
       el('span', { className: 'chat-name', title: name, text: name }),
       el('span', { className: 'badge', text: chat.isGroup ? 'Group' : 'Direct' }),
     ]);
-    var metaText = chatMetaText(chat);
+    var metaText = chatMetaText(chat) + (justRefreshed() ? ' · Updated' : '');
     dom.chatCard.appendChild(avatar);
     dom.chatCard.appendChild(
       el('div', { className: 'chat-body' }, [
         titleRow,
-        el('p', { className: 'chat-meta', title: metaText, text: metaText }),
+        el('p', { className: 'chat-meta', title: metaText, text: metaText, 'aria-live': 'polite' }),
       ])
     );
     dom.chatCard.appendChild(buildRefreshButton());
+  }
+
+  /** A refresh finished in the last few seconds: say so, or the button looks inert. */
+  function justRefreshed() {
+    return Boolean(state.refreshedAt && Date.now() - state.refreshedAt < REFRESHED_NOTE_MS);
   }
 
   function chatMetaText(chat) {
@@ -1809,7 +1819,20 @@
     try {
       var reply = await sendToContent(state.tabId, { type: WAEx.MSG.PING, scan: true });
       if (!isPingReply(reply)) throw new Error('No chat snapshot returned.');
+      if (!reply.chat || !reply.chat.found) {
+        // The tab answered but sees no chat: possibly a copy of the extension left over from
+        // before a reload. Re-run the scripts in the tab (the newest copy takes over), then ask
+        // again. Normally only reloading the WhatsApp tab does this.
+        try {
+          await injectContentFiles(state.tabId);
+          var again = await sendToContent(state.tabId, { type: WAEx.MSG.PING, scan: true });
+          if (isPingReply(again)) reply = again;
+        } catch (reconnectErr) {
+          /* keep the first answer */
+        }
+      }
       applyPingReply(reply);
+      state.refreshedAt = Date.now();
     } catch (err) {
       try {
         var retryReply = await ensureContentScript(state.tabId);
@@ -1821,6 +1844,11 @@
     } finally {
       state.refreshing = false;
       render();
+      if (state.refreshedAt) {
+        setTimeout(function () {
+          if (!state.refreshing) renderChatCard();
+        }, REFRESHED_NOTE_MS + 50);
+      }
     }
   }
 
