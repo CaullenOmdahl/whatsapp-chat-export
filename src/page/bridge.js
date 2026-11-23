@@ -257,23 +257,48 @@
     return null;
   }
 
-  /** The downloaded file of a message, if WhatsApp has it: a Blob, or null. */
-  async function blobOf(msg) {
+  function isBlob(value) {
+    return Boolean(value && typeof value.arrayBuffer === 'function' && typeof value.size === 'number');
+  }
+
+  /**
+   * The downloaded file of a message, if WhatsApp has it: a Blob, or null. `note` records
+   * what was found, so a failure can say which step did not work.
+   */
+  async function blobOf(msg, note) {
     var mediaData = get(msg, 'mediaData');
     var mediaBlob = mediaData ? get(mediaData, 'mediaBlob') : null;
-    if (!mediaBlob) return null;
-    try {
-      var blob =
-        typeof mediaBlob.forceToBlob === 'function'
-          ? mediaBlob.forceToBlob()
-          : typeof mediaBlob.getBlob === 'function'
-            ? mediaBlob.getBlob()
-            : mediaBlob.blob;
-      if (blob && typeof blob.then === 'function') blob = await blob;
-      return blob && typeof blob.arrayBuffer === 'function' ? blob : null;
-    } catch (err) {
-      return null; // released by WhatsApp's cache; downloading again refills it
+    if (!mediaBlob) {
+      note.found = 'no mediaBlob';
+      return null;
     }
+    if (isBlob(mediaBlob)) return mediaBlob;
+    var attempts = ['forceToBlob', 'getBlob'];
+    for (var i = 0; i < attempts.length; i++) {
+      if (typeof mediaBlob[attempts[i]] !== 'function') continue;
+      try {
+        var value = mediaBlob[attempts[i]]();
+        if (value && typeof value.then === 'function') value = await value;
+        if (isBlob(value)) return value;
+        if (value && isBlob(value.blob)) return value.blob;
+        note.found = attempts[i] + ' gave ' + (value === null ? 'null' : typeof value);
+      } catch (err) {
+        note.found = attempts[i] + ' threw ' + String((err && err.message) || err).slice(0, 60);
+      }
+    }
+    if (isBlob(mediaBlob.blob)) return mediaBlob.blob;
+    // Last resort: the object URL WhatsApp renders the media from (local to this page).
+    try {
+      var url = typeof mediaBlob.url === 'function' ? mediaBlob.url() : get(mediaData, 'renderableUrl');
+      if (typeof url === 'string' && /^blob:/.test(url)) {
+        var response = await window.fetch(url);
+        var fetched = await response.blob();
+        if (isBlob(fetched)) return fetched;
+      }
+    } catch (err) {
+      note.found = (note.found ? note.found + '; ' : '') + 'blob url unreadable';
+    }
+    return null;
   }
 
   function stageOf(msg) {
@@ -281,35 +306,65 @@
     return String((mediaData && get(mediaData, 'mediaStage')) || '');
   }
 
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
   /**
    * Media of one message, downloaded the way clicking it in WhatsApp does:
    * `forceDownloadMediaEvenIfExpensive()` runs WhatsApp's own download flow (including
    * asking the phone to re-send media the server no longer has), then the decrypted file
    * is read from `mediaData.mediaBlob`. Media WhatsApp already downloaded is read directly.
+   *
+   * The download is started, not awaited: WhatsApp's flow can stay pending for a long time
+   * (media waiting on the phone), so the whole attempt is bounded by one deadline.
    */
   async function downloadMedia(chat, id) {
     var msg = findMsg(chat, id);
     if (!msg) throw new Error('message is no longer loaded');
-    var blob = await blobOf(msg);
+    var note = { found: '' };
+    var blob = await blobOf(msg, note);
     if (!blob) {
+      var failed = null;
+      var started;
       if (typeof msg.forceDownloadMediaEvenIfExpensive === 'function') {
-        await msg.forceDownloadMediaEvenIfExpensive();
+        started = 'forceDownload';
+        Promise.resolve()
+          .then(function () {
+            return msg.forceDownloadMediaEvenIfExpensive();
+          })
+          .catch(function (err) {
+            failed = err || new Error('download failed');
+          });
       } else if (typeof msg.downloadMedia === 'function') {
-        await msg.downloadMedia({ downloadEvenIfExpensive: true, isUserInitiated: true });
+        started = 'downloadMedia';
+        Promise.resolve()
+          .then(function () {
+            return msg.downloadMedia({ downloadEvenIfExpensive: true, isUserInitiated: true });
+          })
+          .catch(function (err) {
+            failed = err || new Error('download failed');
+          });
       } else {
         throw new Error('WhatsApp download function not found');
       }
-      // The flow can return before the file is in place; wait for it.
-      var waitMs = Number(window.__waxMediaWaitMs) || 90000;
-      var deadline = Date.now() + waitMs;
-      while (!(blob = await blobOf(msg)) && Date.now() < deadline) {
+      var deadline = Date.now() + (Number(window.__waxMediaWaitMs) || 30000);
+      while (!blob && !failed && Date.now() < deadline) {
+        await sleep(250);
         if (/ERROR|FAIL/i.test(stageOf(msg))) break;
-        await new Promise(function (resolve) {
-          setTimeout(resolve, 200);
-        });
+        blob = await blobOf(msg, note);
+      }
+      if (!blob) {
+        var why = failed
+          ? started + ' failed: ' + String((failed && failed.message) || failed).slice(0, 80)
+          : Date.now() >= deadline
+            ? 'timed out'
+            : 'stage ' + stageOf(msg);
+        throw new Error(why + ' (stage ' + (stageOf(msg) || 'none') + (note.found ? ', ' + note.found : '') + ')');
       }
     }
-    if (!blob) throw new Error('not available (' + (stageOf(msg) || 'no media data') + ')');
     var buffer = await blob.arrayBuffer();
     return {
       buffer: buffer,

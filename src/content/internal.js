@@ -25,8 +25,8 @@
     scrollWaitMs: 1500,
     /** One loadEarlier request. */
     loadTimeoutMs: 60000,
-    /** One media download. */
-    mediaTimeoutMs: 120000,
+    /** One media download: the bridge's own 30 s deadline plus room to read the file. */
+    mediaTimeoutMs: 45000,
   };
 
   var MEDIA_KIND = {

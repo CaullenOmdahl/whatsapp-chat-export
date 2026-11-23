@@ -85,8 +85,9 @@ function buildStore({ downloads, failLoader = false, idleLoader = false } = {}) 
     m.forceDownloadMediaEvenIfExpensive = async () => {
       downloads.push(n);
       if (n === 8) {
+        // Waiting on the phone: WhatsApp's call never settles. The bridge must not hang.
         m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
-        return;
+        return new Promise(() => {});
       }
       m.__x_mediaData.__x_mediaStage = 'RESOLVED';
       m.__x_mediaData.__x_mediaBlob = blobFor(n);
@@ -205,7 +206,7 @@ await checkAsync('downloads media that was never opened, the way a click does', 
   eq(mediaProgress[0].loaded, 0, 'the media counter starts at 0');
   eq(mediaProgress[mediaProgress.length - 1].loaded, 7, 'and ends at the number of items');
   ok(
-    result.warnings.some((w) => /^Could not save one image file: WhatsApp could not download it \(not available \(NEED_POKE\)\)/.test(w)),
+    result.warnings.some((w) => /^Could not save one image file: WhatsApp could not download it \(timed out \(stage NEED_POKE/.test(w)),
     'the stuck one is reported: ' + JSON.stringify(result.warnings)
   );
   eq(page.downloads.length, 1);

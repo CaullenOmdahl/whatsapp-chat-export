@@ -142,8 +142,11 @@ for (const file of shipped) {
 const mediaSource = read('src/content/media.js');
 const fetchCallers = shipped.filter((file) => /\bfetch\s*\(/.test(read(file)));
 for (const file of fetchCallers) {
-  if (file !== 'src/content/media.js') {
-    problem(`${file}: calls fetch(); only src/content/media.js may, and only for blob:/data: URLs`);
+  // The page bridge may read a media object URL WhatsApp created, and nothing else.
+  const bridgeBlobOnly = file === 'src/page/bridge.js' && /\/\^blob:\/\.test\(url\)/.test(read(file)) &&
+    (read(file).match(/\bfetch\s*\(/g) || []).length === 1;
+  if (file !== 'src/content/media.js' && !bridgeBlobOnly) {
+    problem(`${file}: calls fetch(); only src/content/media.js (blob:/data:) and the page bridge (one blob: read) may`);
   }
 }
 if (fetchCallers.length && !/^(blob|data):/.test(mediaSource) && !/blob|data/.test(mediaSource)) {
