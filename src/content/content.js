@@ -419,6 +419,18 @@
         if (collector.queued > 0) {
           // `loaded` still holds the message count from loading; this phase counts media.
           setPhase(PHASE.MEDIA, 'Saving media', { percent: 0, loaded: 0, total: collector.queued });
+          if (usedStore) {
+            // Start every download at once; waits on the phone then overlap.
+            await internal.prefetchMedia(
+              messages
+                .filter(function (m) {
+                  return m.media && /^wax-msg:/.test(m.media.url || '');
+                })
+                .map(function (m) {
+                  return m.media.url.slice('wax-msg:'.length);
+                })
+            );
+          }
           mediaResult = await collector.drain();
           warnings = warnings.concat(mediaResult.warnings || []);
           if (cancelRequested) throw cancelledError();

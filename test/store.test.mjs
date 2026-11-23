@@ -49,7 +49,7 @@ function msg(n, attrs) {
   });
 }
 
-function buildStore({ downloads, failLoader = false, idleLoader = false } = {}) {
+function buildStore({ downloads, failLoader = false, idleLoader = false, allStuck = false } = {}) {
   const older = [
     msg(1, { type: 'e2e_notification' }),
     msg(2, { type: 'chat', body: 'First message, loaded only on request.' }),
@@ -84,7 +84,7 @@ function buildStore({ downloads, failLoader = false, idleLoader = false } = {}) 
     m.__x_mediaData = new Model({ mediaStage: n === 4 ? 'RESOLVED' : 'INIT', mediaBlob: n === 4 ? blobFor(n) : null });
     m.forceDownloadMediaEvenIfExpensive = async () => {
       downloads.push(n);
-      if (n === 8) {
+      if (n === 8 || allStuck) {
         // Waiting on the phone: WhatsApp's call never settles. The bridge must not hang.
         m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
         return new Promise(() => {});
@@ -280,6 +280,39 @@ await checkAsync('the popup card counts what WhatsApp has loaded, not what is on
   const after = await page.mock.dispatch({ type: 'WAX:PING' });
   eq(after.chat.renderedCount, 13, 'history loaded by the export is counted');
   eq(after.chat.fullHistory, true, 'and the popup can say it is the whole chat');
+  page.dom.window.close();
+});
+
+await checkAsync('every download is started at once, before any is read', async () => {
+  const page = bootStorePage();
+  const prefetched = [];
+  const real = page.WAEx.internal.prefetchMedia;
+  page.WAEx.internal.prefetchMedia = async (ids) => {
+    prefetched.push(...ids);
+    const result = await real(ids);
+    eq(page.mediaRequests.length, 6, 'all downloads started together (the opened photo needs none)');
+    eq(result.started, 6);
+    return result;
+  };
+  const result = await runExport(page, { format: 'json', mediaMode: 'download' });
+  ok(result.ok, JSON.stringify(result.error));
+  eq(prefetched.length, 7, 'every media message was handed to the prefetch');
+  eq(page.mediaRequests.length, 6, 'each download started once, not again when read');
+  page.dom.window.close();
+});
+
+await checkAsync('stuck downloads overlap instead of queueing', async () => {
+  // Live: 20 of 74 media items wait on the phone. Started three at a time with 30 s each,
+  // they alone took minutes. Started together, later ones only wait out the remainder.
+  const page = bootStorePage({ allStuck: true });
+  page.window.__waxMediaWaitMs = 600;
+  const startedAt = Date.now();
+  const result = await runExport(page, { format: 'json', mediaMode: 'download' });
+  const elapsed = Date.now() - startedAt;
+  ok(result.ok, JSON.stringify(result.error));
+  eq(result.mediaCaptured, 1, 'only the already-opened photo');
+  // Measured: ~770 ms started together, ~1,500 ms started three at a time.
+  ok(elapsed < 2 * 600, `6 stuck items took ${elapsed} ms; started three at a time they take ~1,500 ms`);
   page.dom.window.close();
 });
 

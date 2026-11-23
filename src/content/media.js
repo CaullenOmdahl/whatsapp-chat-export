@@ -18,7 +18,9 @@
 
   var WAEx = (global.WAEx = global.WAEx || {});
 
+  /** Page blob: URLs are local reads; downloads through WhatsApp mostly wait on the network. */
   var CONCURRENCY = 3;
+  var INTERNAL_CONCURRENCY = 6;
 
   var EXTENSION_BY_MIME = {
     'image/jpeg': 'jpg',
@@ -239,7 +241,10 @@
       }
 
       var workers = [];
-      var count = Math.min(CONCURRENCY, pending.length);
+      var internalJobs = pending.some(function (job) {
+        return /^wax-msg:/.test(job.url);
+      });
+      var count = Math.min(internalJobs ? INTERNAL_CONCURRENCY : CONCURRENCY, pending.length);
       for (var w = 0; w < count; w++) workers.push(worker());
       await Promise.all(workers);
 

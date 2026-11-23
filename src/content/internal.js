@@ -271,6 +271,16 @@
     return { chatName: result.chatName, isGroup: result.isGroup, messages: messages, warnings: warnings };
   }
 
+  /** Ask WhatsApp to start downloading all of these messages' media at once. */
+  async function prefetchMedia(ids) {
+    if (!ids.length) return { started: 0 };
+    try {
+      return await bridge().call('prefetchMedia', { ids: ids }, 30000);
+    } catch (err) {
+      return { started: 0, error: String((err && err.message) || err) }; // reads still start them
+    }
+  }
+
   /** Decrypted media of one message, for the media collector. */
   async function readMedia(id) {
     return bridge().call('media', { id: id }, LIMITS.mediaTimeoutMs);
@@ -282,6 +292,7 @@
     loadHistory: loadHistory,
     readMessages: readMessages,
     readMedia: readMedia,
+    prefetchMedia: prefetchMedia,
     toMessage: toMessage,
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

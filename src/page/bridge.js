@@ -13,6 +13,7 @@
  *   state     loaded count, oldest timestamp, whether earlier history remains
  *   loadEarlier  ask WhatsApp to load the previous page of history (as scrolling up does)
  *   messages  every loaded message of the open chat, as plain data
+ *   prefetchMedia  start downloading many messages' media at once
  *   media     the decrypted bytes of one message's media
  *
  * Nothing here sends, edits, deletes or marks anything. WhatsApp's internal module
@@ -321,44 +322,83 @@
    * The download is started, not awaited: WhatsApp's flow can stay pending for a long time
    * (media waiting on the phone), so the whole attempt is bounded by one deadline.
    */
+  /**
+   * Started downloads, by message id: { how, failed, startedAt }. Starting is separate from
+   * reading so every download can be started at once (`prefetchMedia`): requests that wait
+   * on the phone then overlap instead of queueing behind each other.
+   */
+  var downloads = Object.create(null);
+
+  function startDownload(msg, id) {
+    if (downloads[id]) return downloads[id];
+    var entry = { how: '', failed: null, startedAt: Date.now() };
+    var run;
+    if (typeof msg.forceDownloadMediaEvenIfExpensive === 'function') {
+      entry.how = 'forceDownload';
+      run = function () {
+        return msg.forceDownloadMediaEvenIfExpensive();
+      };
+    } else if (typeof msg.downloadMedia === 'function') {
+      entry.how = 'downloadMedia';
+      run = function () {
+        return msg.downloadMedia({ downloadEvenIfExpensive: true, isUserInitiated: true });
+      };
+    } else {
+      entry.failed = new Error('WhatsApp download function not found');
+      downloads[id] = entry;
+      return entry;
+    }
+    // Started, not awaited: WhatsApp's flow can stay pending for a long time.
+    Promise.resolve()
+      .then(run)
+      .catch(function (err) {
+        entry.failed = err || new Error('download failed');
+      });
+    downloads[id] = entry;
+    return entry;
+  }
+
+  /** Start downloading every listed message's media that WhatsApp does not have yet. */
+  async function prefetchMedia(chat, ids) {
+    var started = 0;
+    var note = { found: '' };
+    for (var i = 0; i < ids.length; i++) {
+      var msg = findMsg(chat, ids[i]);
+      if (!msg || downloads[ids[i]]) continue;
+      if (await blobOf(msg, note)) continue;
+      startDownload(msg, ids[i]);
+      started++;
+    }
+    return { started: started };
+  }
+
   async function downloadMedia(chat, id) {
     var msg = findMsg(chat, id);
     if (!msg) throw new Error('message is no longer loaded');
     var note = { found: '' };
     var blob = await blobOf(msg, note);
     if (!blob) {
-      var failed = null;
-      var started;
-      if (typeof msg.forceDownloadMediaEvenIfExpensive === 'function') {
-        started = 'forceDownload';
-        Promise.resolve()
-          .then(function () {
-            return msg.forceDownloadMediaEvenIfExpensive();
-          })
-          .catch(function (err) {
-            failed = err || new Error('download failed');
-          });
-      } else if (typeof msg.downloadMedia === 'function') {
-        started = 'downloadMedia';
-        Promise.resolve()
-          .then(function () {
-            return msg.downloadMedia({ downloadEvenIfExpensive: true, isUserInitiated: true });
-          })
-          .catch(function (err) {
-            failed = err || new Error('download failed');
-          });
-      } else {
-        throw new Error('WhatsApp download function not found');
-      }
-      var deadline = Date.now() + (Number(window.__waxMediaWaitMs) || 30000);
-      while (!blob && !failed && Date.now() < deadline) {
-        await sleep(250);
-        if (/ERROR|FAIL/i.test(stageOf(msg))) break;
+      var entry = startDownload(msg, id);
+      // The limit counts from the download's start, restarts whenever its stage changes
+      // (it is moving through WhatsApp's queue), and leaves at least a third of it (10 s)
+      // from this read.
+      var waitMs = Number(window.__waxMediaWaitMs) || 30000;
+      var lastStage = stageOf(msg);
+      var deadline = Math.max(entry.startedAt + waitMs, Date.now() + Math.round(waitMs / 3));
+      while (!blob && !entry.failed && Date.now() < deadline) {
+        var stage = stageOf(msg);
+        if (/ERROR|FAIL/i.test(stage)) break;
+        if (stage !== lastStage) {
+          lastStage = stage;
+          deadline = Math.max(deadline, Date.now() + waitMs);
+        }
         blob = await blobOf(msg, note);
+        if (!blob) await sleep(250);
       }
+      delete downloads[id]; // finished either way; a later export may try again
       if (!blob) {
-        var why = failed
-          ? started + ' failed: ' + String((failed && failed.message) || failed).slice(0, 80)
+        var why = entry.failed
+          ? entry.how + ' failed: ' + String((entry.failed && entry.failed.message) || entry.failed).slice(0, 80)
           : Date.now() >= deadline
             ? 'timed out'
             : 'stage ' + stageOf(msg);
@@ -460,6 +500,7 @@
       return { chatName: name, isGroup: group, messages: messages, state: loadState(chat) };
     }
     if (type === 'media') return downloadMedia(chat, String((payload && payload.id) || ''));
+    if (type === 'prefetchMedia') return prefetchMedia(chat, (payload && payload.ids) || []);
     throw new Error('unknown request ' + type);
   }
 

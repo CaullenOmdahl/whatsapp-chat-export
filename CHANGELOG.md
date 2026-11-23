@@ -38,8 +38,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   loaded" for a 941-message chat, counting only rows on screen), shows the loaded date span,
   and says "All N messages" once WhatsApp has nothing earlier.
 - The media counter no longer reads "Saving media 943 of 71".
-- Each media download has a 30-second limit; a download waiting on the phone could stall an
-  export for many minutes.
+- Media downloads are all started at once and read six at a time, and each has a time limit
+  (30 s, restarted while it makes progress). A download waiting on the phone could stall an
+  export for many minutes, and those waits used to queue three at a time.
 - Refresh in the popup confirms it ran ("Updated"), and when the tab reports no open chat it
   reconnects to the tab first. After reloading the extension, a fresh copy of the extension's
   scripts now takes over from the old one instead of quitting, and the "Open a chat" card
