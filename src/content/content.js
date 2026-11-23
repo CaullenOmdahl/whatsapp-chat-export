@@ -488,6 +488,8 @@
         stats: stats,
       };
 
+      // The file carries its own notes (date range, warnings) so it explains itself.
+      meta.warnings = warnings.slice();
       var serialized = formats.serialize(settings.format, messages, meta);
       var baseName = formats.buildBaseName(chatInfo.name, meta.exportedAt);
       var reportFileName = baseName + '.' + serialized.extension;

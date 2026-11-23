@@ -122,8 +122,8 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
         // Expired on the server: the phone re-sends it, slower than the base time limit,
         // but each stage change shows progress.
         m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
-        setTimeout(() => (m.__x_mediaData.__x_mediaStage = 'REUPLOADING'), 150);
-        setTimeout(finish, 330);
+        setTimeout(() => (m.__x_mediaData.__x_mediaStage = 'REUPLOADING'), 250);
+        setTimeout(finish, 620);
         return;
       }
       if (n === 12) {
@@ -181,7 +181,9 @@ function bootStorePage(options = {}) {
   const env = createEnv(buildFixtureHtml({ title: 'Richard Roe' }));
   const store = buildStore({ downloads: mediaRequests, ...options });
   if (!options.noRequire) env.window.require = store.require;
-  env.window.__waxMediaWaitMs = 200;
+  // Media time limit for tests. The slow re-sent photo below needs longer than this, so it
+  // only arrives if progress (stage changes) extends the limit.
+  env.window.__waxMediaWaitMs = 400;
   const mock = makeChrome(env.window);
   loadScripts(env.window, [...CONTENT_FILES, 'src/page/bridge.js', 'src/content/content.js']);
   fastHistoryLimits(env.window);
@@ -377,6 +379,25 @@ await checkAsync("finds the argument form WhatsApp's loader needs", async () => 
   const data = JSON.parse(await page.downloads[0].blob.text());
   eq(data.messages.length, 13, 'the earlier messages were loaded with (chat, msgs)');
   page.dom.window.close();
+});
+
+await checkAsync('the export file carries its date range and warnings', async () => {
+  // Live: an export stopped early and the reason was only in the popup.
+  const page = bootStorePage({ failLoader: true });
+  const result = await runExport(page, { format: 'txt', mediaMode: 'skip' });
+  ok(result.ok, JSON.stringify(result.error));
+  const text = await page.downloads[0].blob.text();
+  ok(/^Date range: All time$/m.test(text), 'date range in the header');
+  ok(/^Warnings:\n  - /m.test(text), 'warnings in the header');
+  ok(/^  - Loading details: /m.test(text), 'including the loading details');
+  page.dom.window.close();
+
+  const jsonPage = bootStorePage({ failLoader: true });
+  await runExport(jsonPage, { format: 'json', mediaMode: 'skip', dateRange: '90d' });
+  const data = JSON.parse(await jsonPage.downloads[0].blob.text());
+  eq(data.settings.dateRangeLabel, 'Last 90 days');
+  ok(data.warnings.some((w) => /^Loading details: /.test(w)), JSON.stringify(data.warnings));
+  jsonPage.dom.window.close();
 });
 
 process.exit(summary() ? 0 : 1);

@@ -38,6 +38,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   loaded" for a 941-message chat, counting only rows on screen), shows the loaded date span,
   and says "All N messages" once WhatsApp has nothing earlier.
 - The media counter no longer reads "Saving media 943 of 71".
+- TXT, JSON and HTML exports record the date range used and every warning, so a short or
+  incomplete export explains itself without the popup.
 - Media downloads are all started at once and read six at a time, and each has a time limit
   (30 s, restarted while it makes progress). A download waiting on the phone could stall an
   export for many minutes, and those waits used to queue three at a time.
