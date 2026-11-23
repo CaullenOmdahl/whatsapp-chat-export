@@ -75,14 +75,42 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
     msg(13, { type: 'call_log', isVideoCall: false }),
   ];
 
-  // Media, as on the live build: one already opened (RESOLVED), the rest downloaded on
-  // request, one stuck waiting for the phone to re-send it (NEED_POKE).
-  const blobFor = (n) => ({ forceToBlob: () => new Blob([new Uint8Array(512).fill(n)], { type: 'application/octet-stream' }) });
+  // Media, as on the live build (scripts/wa-full-probe.js, 2026-11): a finished download is
+  // put on mediaObject.mediaBlob and freed (autoreleased) soon after; the file stays in the
+  // media cache (WAWebMediaStore.LruMediaStore) under its filehash. The photo opened before
+  // the export is only in the cache. One item waits on the phone forever, one is re-sent
+  // slowly, and the document only comes through as the download promise's result.
+  const cache = new Map();
+  const bytes = (n) => new Uint8Array(512).fill(n).buffer;
+  const mediaBlobFor = (n) => ({
+    released: false,
+    forceToBlob() {
+      if (this.released) throw new Error('MediaBlob released');
+      return new Blob([bytes(n)], { type: 'application/octet-stream' });
+    },
+    autorelease() {
+      this.released = true;
+    },
+  });
   for (const m of loaded) {
     if (!m.__x_mediaKey) continue;
     const n = Number(m.__x_id.id.slice(1));
-    m.__x_mediaData = new Model({ mediaStage: n === 4 ? 'RESOLVED' : 'INIT', mediaBlob: n === 4 ? blobFor(n) : null });
-    m.__x_mediaObject = { mediaBlob: null };
+    const filehash = 'hash' + n;
+    m.__x_mediaData = new Model({ mediaStage: n === 4 ? 'RESOLVED' : 'INIT', mediaBlob: null, filehash });
+    m.__x_mediaObject = { mediaBlob: null, downloadPromise: null, getDownloadPromise() { return this.downloadPromise; } };
+    if (n === 4) cache.set(filehash, { key: filehash, value: bytes(n) });
+    const finish = () => {
+      // As WhatsApp does: consolidate, render, then free the in-memory copy.
+      const blob = mediaBlobFor(n);
+      m.__x_mediaObject.mediaBlob = blob;
+      m.__x_mediaData.__x_mediaStage = 'RESOLVED';
+      if (n !== 12) cache.set(filehash, { key: filehash, value: bytes(n) });
+      setTimeout(() => {
+        blob.autorelease();
+        m.__x_mediaObject.mediaBlob = null;
+      }, 30);
+      return blob;
+    };
     m.forceDownloadMediaEvenIfExpensive = async () => {
       downloads.push(n);
       if (n === 8 || allStuck) {
@@ -95,15 +123,15 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
         // but each stage change shows progress.
         m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
         setTimeout(() => (m.__x_mediaData.__x_mediaStage = 'REUPLOADING'), 150);
-        setTimeout(() => {
-          m.__x_mediaData.__x_mediaStage = 'RESOLVED';
-          m.__x_mediaObject.mediaBlob = blobFor(n);
-        }, 330);
+        setTimeout(finish, 330);
         return;
       }
-      // Live: the downloaded file is on the message's mediaObject, not on mediaData.
-      m.__x_mediaData.__x_mediaStage = 'RESOLVED';
-      m.__x_mediaObject.mediaBlob = blobFor(n);
+      if (n === 12) {
+        // Not cached: only the download promise's own result carries the file.
+        m.__x_mediaObject.downloadPromise = new Promise((resolve) => setTimeout(() => resolve(finish()), 20));
+        return;
+      }
+      finish();
     };
   }
 
@@ -127,6 +155,7 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
             : null,
       },
     },
+    WAWebMediaStore: { LruMediaStore: { get: async (key) => cache.get(key) || null } },
     WAWebChatLoadMessages: {
       loadEarlierMsgs: async (c) => {
         if (failLoader) throw new Error('loader changed');
@@ -221,6 +250,10 @@ await checkAsync('downloads media that was never opened, the way a click does', 
   ok(
     result.warnings.some((w) => /^Could not save one image file: WhatsApp could not download it \(timed out \(stage NEED_POKE/.test(w)),
     'the stuck one is reported: ' + JSON.stringify(result.warnings)
+  );
+  ok(
+    result.warnings.some((w) => /mediaObject\.mediaBlob=null.*cache=null/.test(w)),
+    'and the warning says what each place returned, so no extra probe is needed: ' + JSON.stringify(result.warnings)
   );
   eq(page.downloads.length, 1);
   ok(page.downloads[0].filename.endsWith('.zip'), page.downloads[0].filename);

@@ -262,48 +262,136 @@
     return Boolean(value && typeof value.arrayBuffer === 'function' && typeof value.size === 'number');
   }
 
+  /** Shape of a value for failure messages: type and key names only, never contents. */
+  function describe(value) {
+    if (value === null) return 'null';
+    if (value === undefined) return 'none';
+    var tag = Object.prototype.toString.call(value).slice(8, -1);
+    if (typeof value !== 'object') return typeof value;
+    var keys = [];
+    try {
+      keys = Object.keys(value).filter(function (k) {
+        return !/^\$/.test(k);
+      });
+    } catch (err) {
+      keys = [];
+    }
+    return tag + (keys.length ? '{' + keys.slice(0, 6).join(',') + '}' : '');
+  }
+
   /**
-   * The downloaded file of a message, if WhatsApp has it: a Blob, or null. `note` records
-   * what was found, so a failure can say which step did not work.
+   * Turn whatever WhatsApp hands back into a Blob: a Blob, raw bytes, its MediaBlob wrapper
+   * (forceToBlob/getBlob), a promise of any of these, or a record holding one of them.
+   */
+  async function unwrap(value, mimetype, depth) {
+    if (value == null || (depth || 0) > 3) return null;
+    try {
+      if (typeof value.then === 'function') {
+        value = await Promise.race([
+          value,
+          new Promise(function (resolve) {
+            setTimeout(resolve, 5000, null);
+          }),
+        ]);
+        if (value == null) return null;
+      }
+      if (isBlob(value)) return value;
+      var tag = Object.prototype.toString.call(value);
+      if (tag === '[object ArrayBuffer]' || ArrayBuffer.isView(value)) {
+        return new Blob([value], { type: mimetype || '' });
+      }
+      if (typeof value === 'string') return /^blob:/.test(value) ? blobFromUrl(value) : null;
+      if (typeof value !== 'object') return null;
+      if (value.released === true) return null;
+      var methods = ['forceToBlob', 'getBlob'];
+      for (var i = 0; i < methods.length; i++) {
+        if (typeof value[methods[i]] === 'function') {
+          var inner = await unwrap(value[methods[i]](), mimetype, (depth || 0) + 1);
+          if (inner) return inner;
+        }
+      }
+      var fields = ['mediaBlob', 'blob', 'data', 'value', 'buffer', 'file', 'arrayBuffer'];
+      for (var j = 0; j < fields.length; j++) {
+        var field = value[fields[j]];
+        if (field != null && typeof field !== 'function') {
+          var found = await unwrap(field, mimetype, (depth || 0) + 1);
+          if (found) return found;
+        }
+      }
+    } catch (err) {
+      /* not readable this way */
+    }
+    return null;
+  }
+
+  function mediaStore() {
+    var mod = req('WAWebMediaStore');
+    return mod && mod.LruMediaStore && typeof mod.LruMediaStore.get === 'function' ? mod.LruMediaStore : null;
+  }
+
+  /**
+   * The downloaded file of a message, if WhatsApp has it: a Blob, or null. `note.found`
+   * records what each source returned (types and key names only), so a failure explains
+   * itself instead of needing another probe.
+   *
+   * Live (2026-11): a finished download is put on mediaObject.mediaBlob and autoreleased
+   * soon after it is rendered (mediaObject.clearBlob); the file stays in WhatsApp's media
+   * cache (WAWebMediaStore.LruMediaStore), keyed by filehash (getLRUStoreKey). Only videos
+   * kept theirs on mediaData.mediaBlob.
    */
   async function blobOf(msg, note) {
     var mediaData = get(msg, 'mediaData');
-    // Live (2026-11): downloaded images, stickers and documents sit on the message's
-    // mediaObject; only videos had theirs on mediaData. Check both.
     var mediaObject = get(msg, 'mediaObject');
-    var mediaBlob = (mediaObject && get(mediaObject, 'mediaBlob')) || (mediaData ? get(mediaData, 'mediaBlob') : null);
-    if (!mediaBlob) {
-      // Stickers (and some cached media) are rendered from a blob: URL with no mediaBlob.
-      var rendered = mediaData ? await blobFromUrl(get(mediaData, 'renderableUrl')) : null;
-      if (rendered) return rendered;
-      note.found = 'no mediaBlob' + (mediaData && get(mediaData, 'renderableUrl') ? ', url unreadable' : ', no url');
-      return null;
-    }
-    if (isBlob(mediaBlob)) return mediaBlob;
-    var attempts = ['forceToBlob', 'getBlob'];
-    for (var i = 0; i < attempts.length; i++) {
-      if (typeof mediaBlob[attempts[i]] !== 'function') continue;
+    var mimetype = String(get(msg, 'mimetype') || '');
+    var seen = [];
+    var sources = [
+      ['mediaObject.mediaBlob', function () {
+        return get(mediaObject, 'mediaBlob');
+      }],
+      ['mediaData.mediaBlob', function () {
+        return get(mediaData, 'mediaBlob');
+      }],
+      ['renderableUrl', function () {
+        return get(mediaData, 'renderableUrl');
+      }],
+      ['download result', function () {
+        var entry = downloads[messageId(msg)];
+        return entry ? entry.result : undefined;
+      }],
+    ];
+    for (var i = 0; i < sources.length; i++) {
+      var value;
       try {
-        var value = mediaBlob[attempts[i]]();
-        if (value && typeof value.then === 'function') value = await value;
-        if (isBlob(value)) return value;
-        if (value && isBlob(value.blob)) return value.blob;
-        note.found = attempts[i] + ' gave ' + (value === null ? 'null' : typeof value);
+        value = sources[i][1]();
       } catch (err) {
-        note.found = attempts[i] + ' threw ' + String((err && err.message) || err).slice(0, 60);
+        seen.push(sources[i][0] + ' threw');
+        continue;
       }
+      var blob = await unwrap(value, mimetype, 0);
+      if (blob) return blob;
+      seen.push(sources[i][0] + '=' + describe(value));
     }
-    if (isBlob(mediaBlob.blob)) return mediaBlob.blob;
-    // Last resort: the object URL WhatsApp renders the media from (local to this page).
-    var url = null;
-    try {
-      url = typeof mediaBlob.url === 'function' ? mediaBlob.url() : null;
-    } catch (err) {
-      url = null;
+    var store = mediaStore();
+    var filehash = get(mediaData, 'filehash') || get(msg, 'filehash');
+    if (store && filehash) {
+      var cached;
+      try {
+        cached = await Promise.race([
+          store.get(filehash),
+          new Promise(function (resolve) {
+            setTimeout(resolve, 5000, undefined);
+          }),
+        ]);
+      } catch (err) {
+        cached = 'threw';
+      }
+      var fromCache = await unwrap(cached, mimetype, 0);
+      if (fromCache) return fromCache;
+      seen.push('cache=' + describe(cached));
+    } else {
+      seen.push(store ? 'cache: no filehash' : 'cache: not found');
     }
-    var fromUrl = await blobFromUrl(url || get(mediaData, 'renderableUrl'));
-    if (fromUrl) return fromUrl;
-    note.found = (note.found ? note.found + '; ' : '') + 'blob url unreadable';
+    note.found = seen.join(', ');
     return null;
   }
 
@@ -372,7 +460,39 @@
         entry.failed = err || new Error('download failed');
       });
     downloads[id] = entry;
+    // WhatsApp frees the downloaded file soon after use, so copy it the moment the
+    // download's own promise settles (mediaObject.getDownloadPromise()).
+    captureResult(msg, entry);
     return entry;
+  }
+
+  async function captureResult(msg, entry) {
+    var mimetype = String(get(msg, 'mimetype') || '');
+    var until = Date.now() + (Number(window.__waxMediaWaitMs) || 30000);
+    while (Date.now() < until && !entry.result && !entry.failed) {
+      var mediaObject = get(msg, 'mediaObject');
+      var promise = null;
+      try {
+        promise = mediaObject && typeof mediaObject.getDownloadPromise === 'function' ? mediaObject.getDownloadPromise() : null;
+      } catch (err) {
+        promise = null;
+      }
+      if (promise) {
+        try {
+          var settled = await promise;
+          entry.result = (await unwrap(settled, mimetype, 0)) || (await unwrap(get(mediaObject, 'mediaBlob'), mimetype, 0));
+        } catch (err) {
+          /* the poll in downloadMedia reports the failure */
+        }
+        return;
+      }
+      var direct = await unwrap(get(mediaObject, 'mediaBlob'), mimetype, 0);
+      if (direct) {
+        entry.result = direct;
+        return;
+      }
+      await sleep(100);
+    }
   }
 
   /** Start downloading every listed message's media that WhatsApp does not have yet. */
