@@ -467,4 +467,132 @@ check('date order cache can be reset between chats', () => {
   main.WAEx.extractor.resolveDateOrder(conversationRows().map((r) => (r.match(/\[[^\]]*\]/) || [''])[0]));
 });
 
+suite('extractor: current WhatsApp data-id format');
+
+/**
+ * WhatsApp Web (seen 2026-11) renders `data-id` as one opaque token: no `true_`/`false_`
+ * prefix, no chat jid. The extractor used to reject every such node, so nothing was
+ * collected while scrolling and an export held only the final screen of messages.
+ */
+const opaque = (row) =>
+  row.replace(/data-id="(?:true|false)_[^"]*_([A-Z0-9]+)"/g, (_, tail) => `data-id="3EB0${tail}C0FFEE"`);
+
+check('opaque data-ids are message nodes, direction comes from .message-out', () => {
+  const env = boot(buildFixtureHtml({ rows: conversationRows().map(opaque) }));
+  eq(env.WAEx.extractor.messageNodes().length, 10, 'every message node is counted');
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  const out = parsed.find((m) => m.id === '3EB0AAA3C0FFEE');
+  ok(out, 'opaque id is kept as the message id');
+  eq(out.isOutgoing, true);
+  eq(parsed.find((m) => m.id === '3EB0AAA1C0FFEE').isOutgoing, false);
+});
+
+check('a 1:1 chat is not a group just because the user also posted', () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .filter((row) => !/Alice|Carol/.test(row) || /message-out/.test(row));
+  const env = boot(buildFixtureHtml({ rows }));
+  eq(env.WAEx.extractor.getChatInfo().isGroup, false);
+});
+
+await checkAsync('opaque ids: messages that WhatsApp unloads while scrolling are kept', async () => {
+  // Start at the oldest message; each page appended below replaces the rows above it,
+  // like a virtualised list. Only collection during scrolling can see every message.
+  const rows = conversationRows().map(opaque);
+  const env = boot(buildFixtureHtml({ rows: rows.slice(0, 5) }));
+  const app = env.document.querySelector('div[role="application"]');
+  const scroller = env.scroller;
+  scroller.__scrollHeight = 700;
+  const pages = [rows.slice(5, 9), rows.slice(9)];
+  let page = 0;
+  scroller.__onScrollTop = (value) => {
+    const max = scroller.__scrollHeight - scroller.__clientHeight;
+    if (value >= max - 2 && page < pages.length) {
+      for (const old of Array.from(app.children)) old.remove();
+      const holder = env.document.createElement('div');
+      holder.innerHTML = pages[page++].join('');
+      for (const node of Array.from(holder.children)) app.appendChild(node);
+      scroller.__scrollHeight += 500;
+    }
+  };
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.loaded, 10, 'every message is collected during scrolling');
+  const ids = result.messages.map((m) => m.id).filter((id) => id.startsWith('3EB0'));
+  eq(
+    ids,
+    ['AAA1', 'AAA2', 'AAA3', 'AAA4', 'AAA5', 'AAA6', 'AAA7', 'BBB1', 'BBB2', 'BBB3'].map((t) => `3EB0${t}C0FFEE`),
+    'exported ids, in order'
+  );
+});
+
+suite('extractor: slow pages and completeness (issue #6)');
+
+await checkAsync('waits for an older page that arrives late with no interim DOM activity', async () => {
+  // Issue #6: a page that took longer than the old 1.1s "quiet DOM" grace was treated
+  // as the start of the chat and silently dropped. Same shape, scaled to test timings:
+  // the page arrives after several quiet-DOM windows but within one growth timeout.
+  const env = boot(buildFixtureHtml());
+  const limits = env.WAEx.extractor.LIMITS;
+  limits.growthTimeoutMs = 400;
+  limits.growthHardCapMs = 800;
+  const app = env.document.querySelector('div[role="application"]');
+  const scroller = env.scroller;
+  scroller.__scrollTop = 600; // starts at the newest message: no downward pass to help
+  let fired = false;
+  scroller.__onScrollTop = (value) => {
+    if (value > 2 || fired) return;
+    fired = true;
+    setTimeout(() => {
+      const holder = env.document.createElement('div');
+      holder.innerHTML = olderRows('L').join('');
+      for (const node of Array.from(holder.children).reverse()) app.insertBefore(node, app.firstChild);
+      scroller.__scrollHeight += 400;
+    }, 250);
+  };
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.loaded, 12, 'the late page is collected');
+  ok(
+    result.messages.some((m) => /OLD1L$/.test(m.id)) && result.messages.some((m) => /OLD2L$/.test(m.id)),
+    'the late page is in the exported messages'
+  );
+});
+
+await checkAsync('warns when the top of the list is a message, not the start of the chat', async () => {
+  const rows = conversationRows().filter((row) => !/end-to-end encrypted/.test(row));
+  const env = boot(buildFixtureHtml({ rows }));
+  const result = await env.WAEx.extractor.loadAllHistory();
+  ok(
+    result.warnings.some((w) => /first message of the conversation was reached/.test(w)),
+    'expected a completeness warning: ' + JSON.stringify(result.warnings)
+  );
+});
+
+await checkAsync('no completeness warning when the chat opens with its system notice', async () => {
+  const env = boot(buildFixtureHtml());
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.warnings, []);
+});
+
+await checkAsync('the "include reactions" setting is honoured while scrolling', async () => {
+  const env = boot(buildFixtureHtml());
+  const result = await env.WAEx.extractor.loadAllHistory({ includeReactions: false });
+  const deck = result.messages.find((m) => /AAA4$/.test(m.id));
+  eq(deck.reactions, [], 'reactions must be dropped when the option is off');
+});
+
+check('without direction classes, delivery ticks mark outgoing messages', () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .map((row) => row.replace(/message-(?:out|in) /, ''))
+    .map((row) =>
+      /AAA3/.test(row) ? row.replace('</span></span></div>', '</span></span><span data-icon="msg-dblcheck"></span></div>') : row
+    );
+  const env = boot(buildFixtureHtml({ rows }));
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  eq(parsed.find((m) => m.id === '3EB0AAA3C0FFEE').isOutgoing, true);
+  eq(parsed.find((m) => m.id === '3EB0AAA1C0FFEE').isOutgoing, false);
+});
+
 process.exit(summary() ? 0 : 1);

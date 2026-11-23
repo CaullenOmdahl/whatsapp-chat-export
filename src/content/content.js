@@ -236,6 +236,7 @@
       // ---- phase 1: load history -------------------------------------------------
       history = await extractor.loadAllHistory({
         dateBounds: bounds,
+        includeReactions: settings.includeReactions,
         shouldCancel: function () {
           return cancelRequested;
         },

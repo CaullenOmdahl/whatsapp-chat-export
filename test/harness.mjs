@@ -319,7 +319,8 @@ export function fastHistoryLimits(window) {
   if (!extractor) return;
   const limits = extractor.LIMITS;
   limits.growthTimeoutMs = 60;
-  limits.growthGraceMs = 30;
+  limits.growthHardCapMs = 120;
+  limits.topIdleRounds = 1;
   limits.activityQuietMs = 20;
   limits.pollMs = 10;
   limits.settleAfterLoadMs = 0;

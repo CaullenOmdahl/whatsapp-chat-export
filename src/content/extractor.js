@@ -6,7 +6,8 @@
  *
  *   - the conversation lives in `#main`
  *   - each message is a `div[role="row"]`, message nodes carry `data-id`
- *     (`true_...` = outgoing, `false_...` = incoming)
+ *     (older builds: `true_...` = outgoing, `false_...` = incoming; current builds:
+ *     an opaque token, with direction on a `.message-out` / `.message-in` element)
  *   - the localised timestamp + author live in `data-pre-plain-text`
  *   - the message list is a scroll container that loads older history on scroll
  *   - text lives in `.selectable-text` / `.copyable-text`
@@ -26,10 +27,14 @@
     maxScrollSteps: 4000,
     /** Overall time budget for loading history, in ms (10 minutes). */
     timeBudgetMs: 10 * 60 * 1000,
-    /** Longest we wait for one page of older messages to arrive. */
+    /**
+     * How long one round waits for a page of messages before calling it idle. A fetch
+     * from the phone or server can be pending with no DOM change at all, so a quiet DOM
+     * alone never ends a round early.
+     */
     growthTimeoutMs: 4000,
-    /** While nothing is loading, how long before a round is called idle. */
-    growthGraceMs: 1100,
+    /** A round that keeps seeing unrelated DOM activity still ends after this. */
+    growthHardCapMs: 8000,
     /** A DOM mutation this recent counts as "still loading". */
     activityQuietMs: 450,
     pollMs: 120,
@@ -37,6 +42,8 @@
     maxIdleRounds: 4,
     /** Incremental rounds before we conclude the chat is fully loaded. */
     nudgeSteps: 3,
+    /** Idle rounds at the very top before one retry, then the start of the chat. */
+    topIdleRounds: 2,
     /** Idle rounds at the bottom before we conclude the newest message is reached. */
     downIdleRounds: 3,
     /** Delay between fast downward steps through already-rendered messages. */
@@ -222,7 +229,7 @@
     for (var i = 0; i < nodes.length; i++) {
       var node = nodes[i];
       var id = node.getAttribute('data-id');
-      if (!isMessageId(id) || seen[id]) continue;
+      if (!isMessageNode(node, id) || seen[id]) continue;
       var parent = node.parentElement;
       if (parent && parent.closest && parent.closest('[data-id]')) continue;
       seen[id] = true;
@@ -335,8 +342,42 @@
     return inner ? inner.getAttribute('data-id') || '' : '';
   }
 
-  function isMessageId(id) {
+  /**
+   * Older WhatsApp builds used `true_<chat>_<id>` / `false_<chat>_<id>`, which also
+   * encoded direction. Current builds (seen 2026-11) use a single opaque token with no
+   * prefix, so any non-empty, whitespace-free value counts; direction comes from
+   * `isOutgoingNode` instead.
+   */
+  function isLegacyMessageId(id) {
     return typeof id === 'string' && /^(true|false)_/.test(id);
+  }
+
+  function isMessageId(id) {
+    return typeof id === 'string' && /^\S+$/.test(id);
+  }
+
+  /**
+   * A `data-id` node that is a message: legacy ids anywhere, opaque ids only inside a
+   * message row, so unrelated `data-id` elements in the panel are not mistaken for one.
+   */
+  function isMessageNode(node, id) {
+    if (!isMessageId(id)) return false;
+    if (isLegacyMessageId(id)) return true;
+    return Boolean(node && node.closest && node.closest('div[role="row"]'));
+  }
+
+  function isOutgoingNode(node, id) {
+    if (isLegacyMessageId(id)) return /^true_/.test(id);
+    if (!node) return false;
+    if (node.classList && node.classList.contains('message-out')) return true;
+    if (!node.querySelector) return false;
+    if (node.querySelector('.message-out')) return true;
+    if (node.querySelector('.message-in')) return false;
+    // No direction class at all: delivery ticks and the pending clock only appear on
+    // messages the user sent.
+    return Boolean(
+      node.querySelector('[data-icon^="msg-check"], [data-icon^="msg-dblcheck"], [data-icon="msg-time"]')
+    );
   }
 
   /* ------------------------------------------------------------ chat info */
@@ -369,9 +410,11 @@
     var root = main || findMain();
     if (!root) return false;
     // Distinct incoming authors among the rendered rows is the most reliable signal.
+    // Outgoing rows carry the user's own name, which would make every 1:1 chat a group.
     var authors = Object.create(null);
     var rows = getRows(root).slice(-80);
     for (var i = 0; i < rows.length; i++) {
+      if (isOutgoingNode(rows[i], rowMessageId(rows[i]))) continue;
       var pre = rows[i].querySelector('[data-pre-plain-text]');
       if (!pre) continue;
       var parsed = dt.parsePrePlainText(pre.getAttribute('data-pre-plain-text'));
@@ -508,12 +551,24 @@
     }
   }
 
+  /** Node count, height and edge message ids of the list: what "a page arrived" changes. */
+  function measureList(main, scroller) {
+    var nodes = messageNodes(main);
+    return {
+      nodes: nodes.length,
+      height: scroller && scroller.isConnected ? scroller.scrollHeight || 0 : 0,
+      firstId: nodes.length ? nodes[0].getAttribute('data-id') : '',
+      lastId: nodes.length ? nodes[nodes.length - 1].getAttribute('data-id') : '',
+    };
+  }
+
   /**
-   * Wait for the next page of older messages.
+   * Wait for the next page of messages.
    *
-   * Resolves as soon as the number of message nodes or the scroll height grows.
-   * While the list is still mutating (WhatsApp fetching history) we keep waiting;
-   * once it has been quiet for a moment we conclude there is nothing older to load.
+   * Resolves as soon as the list grows or its first/last message changes (a virtualised
+   * list can swap a page in without growing). A round is only called idle after the full
+   * `growthTimeoutMs` with no recent DOM activity, so a slow fetch with no spinner is
+   * not mistaken for the end of the conversation.
    */
   function waitForDomChange(scroller, baseline) {
     var main = findMain() || document.body;
@@ -523,10 +578,7 @@
       var observer = null;
 
       function measure() {
-        return {
-          nodes: main.querySelectorAll ? main.querySelectorAll('div[data-id]').length : 0,
-          height: scroller && scroller.isConnected ? scroller.scrollHeight || 0 : 0,
-        };
+        return measureList(main, scroller);
       }
 
       function finish(grew) {
@@ -547,16 +599,21 @@
       var timer = setInterval(function () {
         var now = measure();
         var elapsed = Date.now() - started;
-        if (now.nodes > baseline.nodes || now.height > baseline.height + 20) {
+        if (
+          now.nodes > baseline.nodes ||
+          now.height > baseline.height + 20 ||
+          (baseline.firstId !== undefined && now.firstId !== baseline.firstId) ||
+          (baseline.lastId !== undefined && now.lastId !== baseline.lastId)
+        ) {
           finish(true);
           return;
         }
-        if (elapsed >= LIMITS.growthTimeoutMs) {
+        if (elapsed >= LIMITS.growthHardCapMs) {
           finish(false);
           return;
         }
         var busy = Date.now() - lastActivity < LIMITS.activityQuietMs;
-        if (!busy && elapsed >= LIMITS.growthGraceMs) finish(false);
+        if (!busy && elapsed >= LIMITS.growthTimeoutMs) finish(false);
       }, LIMITS.pollMs);
     });
   }
@@ -631,10 +688,7 @@
     var cancelled = false;
 
     function listMetrics() {
-      return {
-        nodes: main.querySelectorAll ? main.querySelectorAll('div[data-id]').length : 0,
-        height: scroller && scroller.isConnected ? scroller.scrollHeight || 0 : 0,
-      };
+      return measureList(main, scroller);
     }
 
     function collect() {
@@ -643,7 +697,7 @@
       for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
         var id = node.getAttribute('data-id');
-        if (!id || !isMessageId(id) || collected[id]) continue;
+        if (!id || collected[id]) continue;
         seen[id] = node;
         ctx.index = parseIndex++;
         var message = parseRow(node, ctx);
@@ -744,6 +798,8 @@
       var idleAtTop = 0;
       var idleRounds = 0;
       var mode = 'jump';
+      var retriedAtTop = false;
+      var olderEnd = '';
 
       while (!finished()) {
         var atTopBefore = (scroller.scrollTop || 0) <= 2;
@@ -763,25 +819,65 @@
         rounds++;
         report('up');
 
-        if (startDateCovered()) break;
+        if (startDateCovered()) {
+          olderEnd = 'date';
+          break;
+        }
 
         if (changeUp.grew || addedUp > 0) {
           idleRounds = 0;
           idleAtTop = 0;
+          retriedAtTop = false;
           mode = 'jump';
+        } else if (retriedAtTop && (scroller.scrollTop || 0) <= 2) {
+          // The retry's fresh jump to the top brought nothing either.
+          olderEnd = 'top';
+          break;
         } else if (atTopBefore && (scroller.scrollTop || 0) <= 2) {
-          // Already showing the first message and nothing older arrived.
+          // Showing the top of the list and nothing older arrived.
           idleAtTop++;
-          if (idleAtTop >= 2) break;
+          if (idleAtTop >= LIMITS.topIdleRounds) {
+            if (!retriedAtTop) {
+              // Before accepting this as the start, move away and come back once:
+              // WhatsApp loads on a real change of scroll position, and a request that
+              // was dropped or is still pending gets a fresh trigger.
+              retriedAtTop = true;
+              idleAtTop = 0;
+              var away = Math.max(160, Math.round((scroller.clientHeight || 600) * 0.8));
+              scroller.scrollTop = Math.min(
+                Math.max(0, (scroller.scrollHeight || 0) - (scroller.clientHeight || 0)),
+                away
+              );
+              nudgeScroll(scroller, 'down');
+              await sleep(LIMITS.stepDelayMs);
+              continue;
+            }
+            olderEnd = 'top';
+            break;
+          }
         } else {
           idleRounds++;
           if (mode === 'jump' && idleRounds >= LIMITS.maxIdleRounds) {
             mode = 'nudge';
             idleRounds = 0;
           } else if (mode === 'nudge' && idleRounds >= LIMITS.nudgeSteps) {
+            olderEnd = 'stalled';
             break;
           }
         }
+      }
+
+      if (!cancelled && olderEnd === 'stalled') {
+        warnings.push(
+          'Loading older messages stopped before the top of the conversation was reached. ' +
+            'The oldest messages may be missing; scroll up in the chat and export again.'
+        );
+      } else if (!cancelled && olderEnd === 'top' && !startOfChatVisible(main)) {
+        warnings.push(
+          'Could not confirm that the first message of the conversation was reached. ' +
+            'If older messages are missing, scroll to the top of the chat in WhatsApp ' +
+            '(and load older messages from your phone if WhatsApp offers it), then export again.'
+        );
       }
     }
 
@@ -881,6 +977,20 @@
       warnings: warnings,
       cancelled: cancelled,
     };
+  }
+
+  /**
+   * True when the top of the rendered list is a system notice (WhatsApp opens every
+   * conversation with one, such as the encryption notice) rather than a message.
+   * Date dividers are skipped. Language-independent: it checks structure, not text.
+   */
+  function startOfChatVisible(main) {
+    var rows = getRows(main);
+    for (var i = 0; i < rows.length && i < 6; i++) {
+      if (rowMessageId(rows[i])) return false;
+      if (isSystemRow(rows[i])) return true;
+    }
+    return false;
   }
 
   /** Timestamp of the oldest row currently rendered, or null. */
@@ -1165,13 +1275,7 @@
     var ctx = context || {};
     var id = rowMessageId(row);
     var messageId = isMessageId(id) ? id : '';
-    var isOutgoing = /^true_/.test(messageId);
-
-    if (!isOutgoing) {
-      var outEl = row.querySelector ? row.querySelector('.message-out') : null;
-      if (outEl) isOutgoing = true;
-      else if (row.classList && row.classList.contains('message-out')) isOutgoing = true;
-    }
+    var isOutgoing = isOutgoingNode(row, messageId);
 
     var preEl = row.querySelector ? row.querySelector('[data-pre-plain-text]') : null;
     var pre = preEl ? dt.parsePrePlainText(preEl.getAttribute('data-pre-plain-text')) : null;
