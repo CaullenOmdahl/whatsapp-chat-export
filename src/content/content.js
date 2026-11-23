@@ -356,14 +356,24 @@
       // ---- phase 4: build --------------------------------------------------------
       setPhase(PHASE.BUILDING, 'Building file', { percent: null });
 
-      var stats = formats.summarize(messages);
       // Only other people's names count: the user's own messages carry their own name,
-      // so counting every author makes each one-to-one chat look like a group.
+      // so counting every author makes each one-to-one chat look like a group. Decided
+      // from every exported message, not the few rows on screen when the popup opened.
       var incomingAuthors = Object.create(null);
       messages.forEach(function (m) {
         if (!m.isOutgoing && m.author && m.type !== T.SYSTEM) incomingAuthors[m.author] = true;
       });
-      var isGroup = chatInfo.isGroup || Object.keys(incomingAuthors).length > 1;
+      var isGroup = Object.keys(incomingAuthors).length > 1;
+
+      // In a one-to-one chat every incoming message is from the other person, including
+      // the ones WhatsApp renders without an author line (deleted messages, stickers).
+      if (!isGroup) {
+        messages.forEach(function (m) {
+          if (!m.isOutgoing && !m.author && m.type !== T.SYSTEM) m.author = chatInfo.name;
+        });
+      }
+
+      var stats = formats.summarize(messages);
 
       var meta = {
         chat: { name: chatInfo.name, isGroup: isGroup },

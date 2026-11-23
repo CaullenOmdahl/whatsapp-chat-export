@@ -655,4 +655,52 @@ function byIdOf(list, tail) {
   return list.find((m) => m.id === `3EB0${tail}C0FFEE`);
 }
 
+suite('extractor: notices, deleted messages and media warnings (v1.0.4 live export)');
+
+const noticeWithId = `
+  <div role="row">
+    <div class="x1n2onr6" data-id="3EB0NOTICE01">
+      <div class="x1rg5ohu"><span class="_11JPr">Messages and calls are end-to-end encrypted.</span></div>
+    </div>
+  </div>`;
+
+await checkAsync('a notice that carries a data-id is a system message, not an unread placeholder', async () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .filter((row) => !/end-to-end encrypted/.test(row));
+  rows.splice(1, 0, noticeWithId);
+  const env = boot(buildFixtureHtml({ rows }));
+  const result = await env.WAEx.extractor.loadAllHistory();
+  const notice = result.messages.find((m) => m.id === '3EB0NOTICE01');
+  ok(notice, 'the notice is exported');
+  eq(notice.type, 'system');
+  eq(result.warnings, [], 'no unread or start-of-chat warnings');
+});
+
+check('a deleted message says so instead of exporting a blank line', () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .map((row) =>
+      /BBB2/.test(row)
+        ? row.replace(/<div class="copyable-text"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/, '<span>This message was deleted</span></div></div>')
+        : row
+    );
+  const env = boot(buildFixtureHtml({ rows }));
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  const deleted = parsed.find((m) => m.id === '3EB0BBB2C0FFEE');
+  eq(deleted.type, 'deleted');
+  eq(deleted.text, 'This message was deleted');
+});
+
+await checkAsync('media that cannot be read is one warning per kind, not one per file', async () => {
+  const env = boot(buildFixtureHtml());
+  const collector = env.WAEx.media.createCollector({ maxBytes: 1e9 });
+  for (let i = 0; i < 3; i++) {
+    collector.enqueue({ media: { kind: 'sticker', url: `blob:https://web.whatsapp.com/gone-${i}` } });
+  }
+  const result = await collector.drain();
+  eq(result.warnings.length, 1, JSON.stringify(result.warnings));
+  ok(/^Could not read 3 sticker files \(HTTP 404\)/.test(result.warnings[0]), result.warnings[0]);
+});
+
 process.exit(summary() ? 0 : 1);

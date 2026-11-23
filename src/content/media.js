@@ -94,6 +94,7 @@
     var bytes = 0;
     var skipped = 0;
     var warnings = [];
+    var failures = Object.create(null); // kind -> { count, reason }
     var index = 0;
 
     /** Queue one message's media (called during parsing, still synchronous). */
@@ -133,13 +134,11 @@
       } catch (err) {
         media.missing = true;
         skipped++;
-        warnings.push(
-          'Could not read one ' +
-            (media.kind || 'media') +
-            ' file (' +
-            (err && err.message ? err.message : 'unknown error') +
-            '). It was left out of the archive.'
-        );
+        // One warning per kind, not per file: a chat can have dozens of these.
+        var kind = media.kind || 'media';
+        var failure = failures[kind] || (failures[kind] = { count: 0, reason: '' });
+        failure.count++;
+        if (!failure.reason) failure.reason = err && err.message ? err.message : 'unknown error';
         return;
       }
 
@@ -216,6 +215,21 @@
       var count = Math.min(CONCURRENCY, pending.length);
       for (var w = 0; w < count; w++) workers.push(worker());
       await Promise.all(workers);
+
+      Object.keys(failures).forEach(function (kind) {
+        var failure = failures[kind];
+        warnings.push(
+          'Could not read ' +
+            (failure.count === 1 ? 'one ' + kind + ' file' : failure.count + ' ' + kind + ' files') +
+            ' (' +
+            failure.reason +
+            '). WhatsApp had probably already released ' +
+            (failure.count === 1 ? 'it' : 'them') +
+            '; ' +
+            (failure.count === 1 ? 'it is' : 'they are') +
+            ' marked as not loaded in the export.'
+        );
+      });
 
       return {
         entries: entries,

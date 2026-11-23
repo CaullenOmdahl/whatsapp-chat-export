@@ -19,7 +19,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The success panel lists every warning instead of only "2 warnings" with the text hidden
   in a tooltip.
 - A one-to-one chat is no longer marked as a group in the export because the user's own
-  messages carry a second name.
+  messages carry a second name. Incoming messages WhatsApp shows without an author line
+  (deleted messages, some stickers) are attributed to the other person in a one-to-one chat.
+- Deleted messages read "This message was deleted" instead of exporting as a blank line.
+- WhatsApp notices that carry a `data-id` (the encryption notice, for example) are exported
+  as system messages. They were counted as unread placeholders, which also caused a false
+  "could not confirm the first message" warning.
+- Media that could not be read is reported once per kind ("Could not read 8 sticker
+  files…") instead of once per file, and the routine "N messages were recovered…" note is
+  gone.
 
 ### Docs
 

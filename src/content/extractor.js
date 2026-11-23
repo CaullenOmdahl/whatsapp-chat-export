@@ -1000,6 +1000,8 @@
       main: main,
       harvested: seen,
       includeReactions: opts.includeReactions,
+      // Recovering nodes that scrolled away is how loading works, not a problem.
+      reportRecovered: false,
     });
     // DOM order of the final pass first, then anything collected while scrolling that is
     // no longer rendered. Collected copies win: they were parsed in page order, so their
@@ -1069,7 +1071,11 @@
   function startOfChatVisible(main) {
     var rows = getRows(main);
     for (var i = 0; i < rows.length && i < 6; i++) {
-      if (rowMessageId(rows[i])) return false;
+      if (rowMessageId(rows[i])) {
+        // Current builds give notices a data-id as well.
+        var parsed = parseRow(rows[i], { includeReactions: false });
+        return Boolean(parsed && parsed.type === T.SYSTEM);
+      }
       if (isSystemRow(rows[i])) return true;
     }
     return false;
@@ -1407,6 +1413,25 @@
     else if (quote && !bodyText) type = T.UNKNOWN;
     if (type === T.TEXT && !bodyText) type = T.UNKNOWN;
 
+    // Deleted bubbles have no selectable text; say so instead of exporting a blank line.
+    if (deleted && !bodyText) {
+      bodyText = isOutgoing ? 'You deleted this message' : 'This message was deleted';
+    }
+
+    // Nothing message-like but readable text and no copyable body: a WhatsApp notice
+    // (encryption, security code, contact changes). Current builds give these a
+    // data-id too, so they would otherwise look like unfilled placeholders.
+    var hollowCandidate = Boolean(messageId) && !pre && !bodyText && !media && !quote && !reactions.length;
+    var noticeText = '';
+    if (hollowCandidate && !(row.querySelector && row.querySelector('.copyable-text'))) {
+      noticeText = readText(row);
+      if (noticeText.length > 400) noticeText = '';
+    }
+    if (noticeText) {
+      type = T.SYSTEM;
+      bodyText = noticeText;
+    }
+
     return {
       id: messageId || 'row_' + (ctx.index || 0),
       timestamp: timestamp,
@@ -1432,7 +1457,7 @@
       _quoteRoot: quote ? quote.isRoot : null,
       _ownTime: ownTime,
       // An off-screen placeholder WhatsApp has not filled in yet: nothing to export.
-      _hollow: Boolean(messageId) && !pre && !bodyText && !media && !quote && !deleted && !reactions.length,
+      _hollow: hollowCandidate && !noticeText,
     };
   }
 
@@ -1511,7 +1536,7 @@
         seenIds[harvId] = true;
         orphanCount++;
       }
-      if (orphanCount > 0) {
+      if (orphanCount > 0 && opts.reportRecovered !== false) {
         warnings.push(
           orphanCount + ' message(s) were recovered from nodes that left the screen while scrolling.'
         );
