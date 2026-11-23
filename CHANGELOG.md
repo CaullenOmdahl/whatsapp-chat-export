@@ -16,11 +16,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   is not found) until WhatsApp reports the start of the chat. No more scrolling through
   every screen, and none of the screen-reading problems below.
 - **Media you never opened is downloaded.** With Media set to *Download*, every photo,
-  video, voice note, sticker and document in the export is downloaded and decrypted by
-  WhatsApp's own download manager, the same way opening it in WhatsApp does. Media
-  WhatsApp can no longer download is marked as not loaded.
-- `scripts/wa-internals-probe.js`: a read-only DevTools probe of WhatsApp's internal module
-  and field names, for when WhatsApp renames them.
+  video, voice note, sticker and document in the export is downloaded through the same flow
+  as clicking it in WhatsApp, including asking your phone to re-send media WhatsApp's
+  servers no longer have. Media WhatsApp still cannot provide is marked as not loaded.
+- `scripts/wa-internals-probe.js` and `scripts/wa-download-probe.js`: read-only DevTools
+  probes of WhatsApp's internal module and field names and of its media download functions,
+  for when WhatsApp changes them.
 
 ### Changed
 

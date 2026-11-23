@@ -135,9 +135,14 @@ reports no earlier messages, the start of the chosen date range is reached, or a
 hit. It is still limited to what WhatsApp Web itself can load (it may offer to load older messages
 from the phone).
 
-**Media** (Download mode) is fetched by `WAWebDownloadManager`, which downloads and decrypts each
-item from WhatsApp's media servers, the same as when you open a photo. Media WhatsApp can no longer
-download is marked as not loaded, with one warning per kind.
+**Media** (Download mode) goes through the same flow as clicking a photo: the bridge calls the
+message's `forceDownloadMediaEvenIfExpensive()`, which runs WhatsApp's download (and, for media the
+server no longer has, asks the phone to re-send it — `NEED_POKE`), then reads the decrypted file
+from `mediaData.mediaBlob.forceToBlob()`. Media WhatsApp already downloaded is read directly. Calling
+the lower-level `downloadAndMaybeDecrypt` was tried first and fails on current builds: it needs a
+performance-logging object only WhatsApp's own flow creates. Media WhatsApp still cannot provide
+(after a 90-second wait) is marked as not loaded, with one warning per kind.
+`scripts/wa-download-probe.js` saves the source of these functions when they change.
 
 **Fallback.** WhatsApp renames its internals between releases. If they cannot be reached, the export
 falls back to the screen-reading method described below (`src/content/extractor.js`) and says so in
@@ -238,9 +243,9 @@ and unit-testable without a browser.
 In **Download** mode on the store path, the media phase:
 
 1. collects every photo, video, voice note, sticker and document in the exported range,
-2. asks the page bridge to download each one through WhatsApp's own download manager
-   (`WAWebDownloadManager`), which fetches and decrypts it from WhatsApp's servers; the bytes come
-   back to the content script over `postMessage`,
+2. asks the page bridge to download each one the way a click does (see "Media" above), which
+   fetches and decrypts it from WhatsApp's servers; the bytes come back to the content script over
+   `postMessage`,
 3. derives a file name and MIME type, adds the bytes to the ZIP under `media/`,
 4. records `zipPath` for the report, or `missing: true` when WhatsApp can no longer download it,
 5. stops downloading once `maxMediaMb` is reached, marking the remainder as missing.

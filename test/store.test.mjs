@@ -3,8 +3,9 @@
  *
  * A mock of the internals found on WhatsApp Web 2026-11 (scripts/wa-internals-probe.js):
  * `require('WAWebCollections').Chat.getActive()`, `chat.msgs` with `msgLoadState`,
- * models storing attributes as `__x_<name>`, `WAWebChatLoadMessages.loadEarlierMsgs`
- * and `WAWebDownloadManager.downloadManager.downloadAndMaybeDecrypt`.
+ * models storing attributes as `__x_<name>`, `WAWebChatLoadMessages.loadEarlierMsgs`,
+ * and media downloaded the way a click does (`msg.forceDownloadMediaEvenIfExpensive()`,
+ * then `mediaData.mediaBlob.forceToBlob()`; scripts/wa-download-probe.js).
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -74,6 +75,24 @@ function buildStore({ downloads, failLoader = false, idleLoader = false } = {}) 
     msg(13, { type: 'call_log', isVideoCall: false }),
   ];
 
+  // Media, as on the live build: one already opened (RESOLVED), the rest downloaded on
+  // request, one stuck waiting for the phone to re-send it (NEED_POKE).
+  const blobFor = (n) => ({ forceToBlob: () => new Blob([new Uint8Array(512).fill(n)], { type: 'application/octet-stream' }) });
+  for (const m of loaded) {
+    if (!m.__x_mediaKey) continue;
+    const n = Number(m.__x_id.id.slice(1));
+    m.__x_mediaData = new Model({ mediaStage: n === 4 ? 'RESOLVED' : 'INIT', mediaBlob: n === 4 ? blobFor(n) : null });
+    m.forceDownloadMediaEvenIfExpensive = async () => {
+      downloads.push(n);
+      if (n === 8) {
+        m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
+        return;
+      }
+      m.__x_mediaData.__x_mediaStage = 'RESOLVED';
+      m.__x_mediaData.__x_mediaBlob = blobFor(n);
+    };
+  }
+
   const state = new Model({ noEarlierMsgs: false, isLoadingEarlierMsgs: false });
   const list = [...loaded];
   const msgs = { getModelsArray: () => list, msgLoadState: state };
@@ -103,15 +122,6 @@ function buildStore({ downloads, failLoader = false, idleLoader = false } = {}) 
         state.__x_noEarlierMsgs = true;
       },
     },
-    WAWebDownloadManager: {
-      downloadManager: {
-        downloadAndMaybeDecrypt: async (args) => {
-          downloads.push(args.directPath);
-          ok(args.mediaKey && args.type, 'download request carries the media key and type');
-          return new Uint8Array(512).fill(downloads.length).buffer;
-        },
-      },
-    },
   };
   return {
     chat,
@@ -127,6 +137,7 @@ function bootStorePage(options = {}) {
   const env = createEnv(buildFixtureHtml({ title: 'Richard Roe' }));
   const store = buildStore({ downloads: mediaRequests, ...options });
   if (!options.noRequire) env.window.require = store.require;
+  env.window.__waxMediaWaitMs = 200;
   const mock = makeChrome(env.window);
   loadScripts(env.window, [...CONTENT_FILES, 'src/page/bridge.js', 'src/content/content.js']);
   fastHistoryLimits(env.window);
@@ -181,15 +192,19 @@ await checkAsync('direction, authors, text and types come from the store', async
   );
 });
 
-await checkAsync('downloads media that was never opened, through WhatsApp', async () => {
+await checkAsync('downloads media that was never opened, the way a click does', async () => {
   const page = bootStorePage();
   const result = await runExport(page, { format: 'html', mediaMode: 'download', includeSystem: false });
   ok(result.ok, JSON.stringify(result.error));
-  eq(result.mediaCaptured, 7, '5 photos, 1 sticker, 1 document: ' + JSON.stringify(result.warnings));
-  eq(page.mediaRequests.length, 7, 'each one asked WhatsApp for its media');
+  eq(result.mediaCaptured, 6, '4 photos, 1 sticker, 1 document: ' + JSON.stringify(result.warnings));
+  eq(page.mediaRequests.sort((a, b) => a - b), [5, 6, 7, 8, 9, 12], 'the opened photo is read, not downloaded again');
+  ok(
+    result.warnings.some((w) => /^Could not save one image file: WhatsApp could not download it \(not available \(NEED_POKE\)\)/.test(w)),
+    'the stuck one is reported: ' + JSON.stringify(result.warnings)
+  );
   eq(page.downloads.length, 1);
   ok(page.downloads[0].filename.endsWith('.zip'), page.downloads[0].filename);
-  eq(page.downloads.length && page.downloads[0].blob.size > 7 * 512, true, 'the zip holds the media bytes');
+  eq(page.downloads.length && page.downloads[0].blob.size > 6 * 512, true, 'the zip holds the media bytes');
   const file = await saveDownload(OUT, page.downloads[0]);
   const names = execFileSync(
     'python3',
@@ -199,8 +214,10 @@ await checkAsync('downloads media that was never opened, through WhatsApp', asyn
     .trim()
     .split('\n');
   fs.rmSync(file, { force: true });
-  eq(names.filter((n) => n.startsWith('media/')).length, 7, JSON.stringify(names));
+  eq(names.filter((n) => n.startsWith('media/')).length, 6, JSON.stringify(names));
   ok(names.some((n) => /report\.pdf$/.test(n)), 'documents keep their file name');
+  eq(names.filter((n) => /\.bin$/.test(n)), [], 'a generic blob type still gives a real extension');
+  ok(names.some((n) => /-sticker\.webp$/.test(n)), JSON.stringify(names));
   page.dom.window.close();
 });
 

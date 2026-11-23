@@ -57,6 +57,9 @@
     if (clean === 'application/pdf') return 'pdf';
     if (kind === 'sticker') return 'webp';
     if (kind === 'gif') return 'gif';
+    if (kind === 'image') return 'jpg';
+    if (kind === 'video') return 'mp4';
+    if (kind === 'voice' || kind === 'audio') return 'ogg';
     return 'bin';
   }
 
@@ -187,7 +190,10 @@
         ? safeFileName(media.fileName, media.kind || 'file')
         : media.kind || 'file';
       // Avoid doubling the extension when the original name already ends with it.
-      var hasExt = new RegExp('\\.' + ext + '$', 'i').test(baseName);
+      // A document's own name decides its extension; the reported type can be generic.
+      var hasExt =
+        new RegExp('\\.' + ext + '$', 'i').test(baseName) ||
+        (media.kind === 'document' && /\.[a-z0-9]{1,5}$/i.test(baseName));
       var fileName = pad(index, 4) + '-' + baseName + (hasExt ? '' : '.' + ext);
 
       media.zipPath = 'media/' + fileName;

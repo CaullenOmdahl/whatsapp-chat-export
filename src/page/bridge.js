@@ -3,8 +3,9 @@
  *
  * The content script lives in an isolated world and can only see the rendered page,
  * which WhatsApp virtualises (off-screen messages are empty placeholders). WhatsApp's
- * own message store has every loaded message as structured data, and its download
- * manager can fetch and decrypt any media in the chat, opened or not. This bridge
+ * own message store has every loaded message as structured data, and its own download
+ * flow (the one clicking a photo runs) can fetch and decrypt any media in the chat,
+ * opened or not. This bridge
  * exposes a small, read-only slice of that to the content script over
  * `window.postMessage`:
  *
@@ -256,31 +257,68 @@
     return null;
   }
 
+  /** The downloaded file of a message, if WhatsApp has it: a Blob, or null. */
+  async function blobOf(msg) {
+    var mediaData = get(msg, 'mediaData');
+    var mediaBlob = mediaData ? get(mediaData, 'mediaBlob') : null;
+    if (!mediaBlob) return null;
+    try {
+      var blob =
+        typeof mediaBlob.forceToBlob === 'function'
+          ? mediaBlob.forceToBlob()
+          : typeof mediaBlob.getBlob === 'function'
+            ? mediaBlob.getBlob()
+            : mediaBlob.blob;
+      if (blob && typeof blob.then === 'function') blob = await blob;
+      return blob && typeof blob.arrayBuffer === 'function' ? blob : null;
+    } catch (err) {
+      return null; // released by WhatsApp's cache; downloading again refills it
+    }
+  }
+
+  function stageOf(msg) {
+    var mediaData = get(msg, 'mediaData');
+    return String((mediaData && get(mediaData, 'mediaStage')) || '');
+  }
+
+  /**
+   * Media of one message, downloaded the way clicking it in WhatsApp does:
+   * `forceDownloadMediaEvenIfExpensive()` runs WhatsApp's own download flow (including
+   * asking the phone to re-send media the server no longer has), then the decrypted file
+   * is read from `mediaData.mediaBlob`. Media WhatsApp already downloaded is read directly.
+   */
   async function downloadMedia(chat, id) {
     var msg = findMsg(chat, id);
     if (!msg) throw new Error('message is no longer loaded');
-    var manager = (req('WAWebDownloadManager') || {}).downloadManager;
-    if (!manager || typeof manager.downloadAndMaybeDecrypt !== 'function') {
-      throw new Error('WhatsApp download manager not found');
+    var blob = await blobOf(msg);
+    if (!blob) {
+      if (typeof msg.forceDownloadMediaEvenIfExpensive === 'function') {
+        await msg.forceDownloadMediaEvenIfExpensive();
+      } else if (typeof msg.downloadMedia === 'function') {
+        await msg.downloadMedia({ downloadEvenIfExpensive: true, isUserInitiated: true });
+      } else {
+        throw new Error('WhatsApp download function not found');
+      }
+      // The flow can return before the file is in place; wait for it.
+      var waitMs = Number(window.__waxMediaWaitMs) || 90000;
+      var deadline = Date.now() + waitMs;
+      while (!(blob = await blobOf(msg)) && Date.now() < deadline) {
+        if (/ERROR|FAIL/i.test(stageOf(msg))) break;
+        await new Promise(function (resolve) {
+          setTimeout(resolve, 200);
+        });
+      }
     }
-    var controller = typeof AbortController === 'function' ? new AbortController() : null;
-    var data = await manager.downloadAndMaybeDecrypt({
-      directPath: get(msg, 'directPath'),
-      encFilehash: get(msg, 'encFilehash'),
-      filehash: get(msg, 'filehash'),
-      mediaKey: get(msg, 'mediaKey'),
-      mediaKeyTimestamp: get(msg, 'mediaKeyTimestamp'),
-      type: get(msg, 'type'),
-      signal: controller ? controller.signal : undefined,
-    });
-    if (!data) throw new Error('empty download');
-    // Compare by tag, not instanceof: the buffer may come from another realm.
-    var tag = Object.prototype.toString.call(data);
-    var buffer = null;
-    if (tag === '[object ArrayBuffer]') buffer = data;
-    else if (ArrayBuffer.isView(data)) buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-    if (!buffer) throw new Error('unexpected download result');
-    return { buffer: buffer, mimetype: String(get(msg, 'mimetype') || ''), filename: String(get(msg, 'filename') || '') };
+    if (!blob) throw new Error('not available (' + (stageOf(msg) || 'no media data') + ')');
+    var buffer = await blob.arrayBuffer();
+    return {
+      buffer: buffer,
+      // The message's own type is more specific than a generic blob type.
+      mimetype: String(
+        (blob.type && blob.type !== 'application/octet-stream' ? blob.type : get(msg, 'mimetype')) || blob.type || ''
+      ),
+      filename: String(get(msg, 'filename') || ''),
+    };
   }
 
   /* -------------------------------------------------------- load earlier */
@@ -331,7 +369,7 @@
         loaded: chat ? msgsOf(chat).length : 0,
         state: chat ? loadState(chat) : null,
         canLoadEarlier: Boolean(earlierLoader()),
-        canDownload: Boolean(((req('WAWebDownloadManager') || {}).downloadManager || {}).downloadAndMaybeDecrypt),
+        canDownload: true,
       };
     }
     if (!chat) throw new Error('no open chat');

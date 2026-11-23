@@ -158,6 +158,11 @@ paste [`scripts/wa-internals-probe.js`](../scripts/wa-internals-probe.js) into D
 WhatsApp tab and attach the `wa-internals-<time>.json` it saves to Downloads to a bug report. It is
 read-only and contains only names, types, booleans and counts, no message content.
 
+If messages export but **media downloads fail** for every item with the same error, WhatsApp
+probably changed its download flow. Paste [`scripts/wa-download-probe.js`](../scripts/wa-download-probe.js)
+the same way and attach the `wa-download-<time>.json` it saves: it holds the source text of
+WhatsApp's download functions (WhatsApp's code, not your data) and which fields hold downloaded media.
+
 For a deeper look at what WhatsApp is rendering, paste [`scripts/wa-probe.js`](../scripts/wa-probe.js)
 into DevTools on the WhatsApp tab. It scrolls through the loaded part of the open chat and saves a
 structure-only report (`wa-probe-<time>.json`, no message text, names, numbers or ids) to your
