@@ -140,8 +140,12 @@ zero matches, or `renderedRows > 0` with `parsedMessages == 0`, points straight 
 
 Each rendered message carries a `data-id` that is unique and stable for that message, so it is the
 identity used everywhere: de-duplication, the render count, and the scroll loop's "did anything new
-appear?" check. Only unique ids that look like `true_…`/`false_…` count as messages — raw
-`div[data-id]` nodes are not counted directly, because WhatsApp can nest or re-render them.
+appear?" check. Older WhatsApp builds used ids like `true_…`/`false_…`, which also encoded the
+message direction; current builds (seen November 2026) use one opaque token, so any non-empty
+`data-id` inside a message row counts, and direction comes from the `.message-out`/`.message-in`
+element (or, failing that, the delivery ticks only outgoing messages carry). Raw `div[data-id]`
+nodes are de-duplicated by id and nested wrappers collapse to one, because WhatsApp can nest or
+re-render them.
 
 Messages are parsed as they appear rather than at the end, so a message whose node is removed
 later still reaches the export. The final DOM pass only adds notices and anything the loop did

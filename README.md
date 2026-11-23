@@ -132,7 +132,7 @@ quoted_author, quoted_text, reactions, media_kind, media_file, media_missing, me
 ```json
 {
   "schema": "chat-export/v1",
-  "generator": "Chat Export for WhatsApp 1.0.1",
+  "generator": "Chat Export for WhatsApp 1.0.3",
   "exportedAt": "2026-11-18T02:30:00.000Z",
   "chat": { "name": "Design Team", "isGroup": true },
   "settings": { "format": "json", "mediaMode": "link", "includeSystem": false,
@@ -174,7 +174,7 @@ step. Installing the unpacked build takes about a minute and works in any Chromi
 ### Option A — grab a release (easiest)
 
 1. Open **[Releases](https://github.com/CaullenOmdahl/whatsapp-chat-export/releases)** and download
-   `whatsapp-chat-export-v1.0.1.zip` from the latest release.
+   `whatsapp-chat-export-vX.Y.Z.zip` (the version number of that release) from the latest release.
 2. Extract it. You should end up with a folder containing `manifest.json`.
 
 ### Option B — from source
@@ -383,7 +383,7 @@ No bundler, no framework, no runtime dependencies: classic scripts on one `WAEx`
 npm ci                # install the one dev dependency
 npm test              # 7 suites
 npm run lint          # permissions, no-network, no-innerHTML, manifest contract, version sync
-npm run build         # dist/whatsapp-chat-export-v1.0.1.zip, ready for the Web Store
+npm run build         # dist/whatsapp-chat-export-v<version>.zip, ready for the Web Store
 ```
 
 | Script | What it does |

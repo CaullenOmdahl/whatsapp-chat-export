@@ -4,6 +4,35 @@ All notable changes to **Chat Export for WhatsApp** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-11-24
+
+### Fixed
+
+- **Exports contain the whole conversation again, not one screenful.** Current WhatsApp Web
+  builds give each message a `data-id` that is a single opaque token instead of the old
+  `true_…`/`false_…` form. The extractor rejected every one, so nothing was collected while
+  scrolling and an export held only the messages on screen when loading finished. Any
+  `data-id` inside a message row now counts; message direction comes from the
+  `.message-out`/`.message-in` element, with the delivery ticks as a fallback.
+- **A slow page of older messages no longer ends loading early** ([#6]). A round used to be
+  called idle after 1.1 s of quiet DOM, and two such rounds at the top ended the export
+  silently. Each round now waits the full 4 s, a page that swaps rows without growing the list
+  counts as progress, and at the top the loader scrolls away and back once before concluding.
+- **Partial exports say so.** A warning appears when loading stalls before the top, or when
+  the top of the list is a message rather than WhatsApp's opening notice.
+- One-to-one chats are no longer labelled as groups because of the user's own messages.
+- The *Include reactions* option is honoured; reactions were always collected before.
+- README release and build examples no longer name an old version ([#5]).
+
+### Note
+
+- The 1.0.2 entry below says an 811-message chat exported in full. That was wrong: on the
+  WhatsApp Web build in use at the time 1.0.2 still exported one screen of messages, for the
+  `data-id` reason above.
+
+[#5]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/5
+[#6]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/6
+
 ## [1.0.2] — 2026-11-18
 
 ### Fixed

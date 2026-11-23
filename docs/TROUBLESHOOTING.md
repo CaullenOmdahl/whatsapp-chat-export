@@ -111,7 +111,7 @@ This is the `NO_MESSAGES` error, meaning the filters removed everything:
 
 ### The export stopped early
 
-The result panel and its warnings list say why. Version 1.0.1 has these safety caps:
+The result panel and its warnings list say why. Current versions have these safety caps:
 
 - **4000 scroll rounds**,
 - a **10-minute** time budget, and
@@ -130,8 +130,11 @@ newest one**. Backwards, it jumps to the top of the list so WhatsApp fetches the
 waits for that page to render, parses it, and repeats; when a jump stops producing new messages it
 falls back to viewport-sized scroll steps. If the chat was not showing its newest message when the
 export started (WhatsApp restores your last scroll position), a second pass then steps down to the
-newest message, collecting each page as it loads. It only concludes the chat is complete after
-several attempts in the relevant direction produce nothing new.
+newest message, collecting each page as it loads. Each attempt waits up to four seconds for
+WhatsApp to deliver a page, even if nothing on screen changes meanwhile, and at the top it scrolls
+away and back once more before concluding there is nothing older. If the top of the list is still
+a message rather than WhatsApp's opening notice, the export finishes with a warning that the first
+message could not be confirmed.
 
 WhatsApp does not render a whole conversation at once — it loads older pages as the list is
 scrolled, so a long chat takes time. While it runs, the progress line counts messages as they are
@@ -148,8 +151,10 @@ If it stops far short of the beginning of a long chat, open **Diagnostics** and 
 
 **Older versions:** 1.0.0 could stop after the messages already on screen when WhatsApp hid the
 message list's scrollbar (fixed in 1.0.1). 1.0.1 only scrolled upwards, so a chat restored to its
-first message exported only the opening page (fixed in 1.0.2). Update and reload the WhatsApp tab
-if you are on anything older.
+first message exported only the opening page (fixed in 1.0.2). 1.0.0–1.0.2 did not recognise the
+message ids current WhatsApp Web builds use, so every export held only the screenful of messages
+visible when loading finished, and a page that took more than about a second to arrive could end
+loading early (both fixed in 1.0.3). Update and reload the WhatsApp tab if you are on anything older.
 
 ### Media is missing from the export
 
