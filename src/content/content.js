@@ -393,6 +393,7 @@
                 ? Math.round((progress.done / progress.attempted) * 100)
                 : 100;
             reportProgress({
+              loaded: Math.min(progress.done, progress.attempted),
               percent: percent,
               detail:
                 'Saving media ' +
@@ -408,7 +409,8 @@
         }
 
         if (collector.queued > 0) {
-          setPhase(PHASE.MEDIA, 'Saving media', { percent: 0, total: collector.queued });
+          // `loaded` still holds the message count from loading; this phase counts media.
+          setPhase(PHASE.MEDIA, 'Saving media', { percent: 0, loaded: 0, total: collector.queued });
           mediaResult = await collector.drain();
           warnings = warnings.concat(mediaResult.warnings || []);
           if (cancelRequested) throw cancelledError();
@@ -568,7 +570,12 @@
 
   /* ------------------------------------------------------------- listeners */
 
-  function replyWithChat(sendResponse) {
+  /**
+   * Chat details for the popup. The page only renders a window of messages, so when the
+   * page bridge is available, the count, date span and group flag come from WhatsApp's
+   * message list instead (the popup showed "96 messages loaded" for a 941-message chat).
+   */
+  async function replyWithChat(sendResponse) {
     var chat;
     try {
       chat = extractor.getChatInfo();
@@ -582,6 +589,21 @@
         renderedCount: 0,
         dateRange: null,
       };
+    }
+
+    if (chat.found && !running) {
+      var store = null;
+      try {
+        store = await internal.probe();
+      } catch (err) {
+        store = null; // the page-only details below are still a valid answer
+      }
+      if (store) {
+        chat.renderedCount = store.loaded;
+        chat.isGroup = store.isGroup;
+        chat.fullHistory = Boolean(store.state && store.state.noEarlierMsgs);
+        if (store.oldest && store.newest) chat.dateRange = { start: store.oldest * 1000, end: store.newest * 1000 };
+      }
     }
 
     sendResponse({

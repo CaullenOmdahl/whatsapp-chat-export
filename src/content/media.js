@@ -218,6 +218,7 @@
       var attempted = pending.length;
       var captured = 0;
       var cursor = 0;
+      var finished = 0; // `cursor` counts items started; progress reports items finished
 
       async function worker() {
         while (true) {
@@ -225,13 +226,14 @@
           var i = cursor++;
           if (i >= pending.length) return;
           await captureOne(pending[i]);
+          finished++;
           if (!pending[i].message.media.missing) captured++;
           report({
             attempted: attempted,
             captured: captured,
             bytes: bytes,
             skipped: skipped,
-            done: cursor,
+            done: finished,
           });
         }
       }

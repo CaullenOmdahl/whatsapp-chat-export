@@ -357,16 +357,28 @@
     return oldest;
   }
 
+  function newestT(list) {
+    var newest = 0;
+    for (var i = 0; i < list.length; i++) {
+      var t = Number(get(list[i], 't')) || 0;
+      if (t > newest) newest = t;
+    }
+    return newest;
+  }
+
   async function handle(type, payload) {
     var chat = activeChat();
     if (type === 'ping') {
+      var loadedList = chat ? msgsOf(chat) : [];
       return {
+        oldest: oldestT(loadedList),
+        newest: newestT(loadedList),
         version: VERSION,
         store: Boolean(req('WAWebCollections')),
         chat: Boolean(chat),
         chatName: chat ? chatName(chat) : '',
         isGroup: chat ? isGroupChat(chat) : false,
-        loaded: chat ? msgsOf(chat).length : 0,
+        loaded: loadedList.length,
         state: chat ? loadState(chat) : null,
         canLoadEarlier: Boolean(earlierLoader()),
         canDownload: true,

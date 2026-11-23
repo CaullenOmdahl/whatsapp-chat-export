@@ -1111,7 +1111,12 @@
     var count = Number(chat.renderedCount) || 0;
     var range = formatChatRange(chat.dateRange);
     if (!count) return 'No messages loaded yet';
-    var parts = [fmtNum(count) + ' ' + pluralMessages(count) + ' loaded'];
+    // fullHistory: WhatsApp reports nothing earlier to load, so this is the whole chat.
+    var parts = [
+      chat.fullHistory
+        ? 'All ' + fmtNum(count) + ' ' + pluralMessages(count)
+        : fmtNum(count) + ' ' + pluralMessages(count) + ' loaded',
+    ];
     if (range) parts.push(range);
     return parts.join(' · ');
   }
@@ -1497,6 +1502,7 @@
       isGroup: !!raw.isGroup,
       initials: typeof raw.initials === 'string' ? raw.initials : '',
       renderedCount: Number(raw.renderedCount) || 0,
+      fullHistory: raw.fullHistory === true,
       dateRange: range,
       reason: typeof raw.reason === 'string' ? raw.reason : '',
     };

@@ -198,6 +198,12 @@ await checkAsync('downloads media that was never opened, the way a click does', 
   ok(result.ok, JSON.stringify(result.error));
   eq(result.mediaCaptured, 6, '4 photos, 1 sticker, 1 document: ' + JSON.stringify(result.warnings));
   eq(page.mediaRequests.sort((a, b) => a - b), [5, 6, 7, 8, 9, 12], 'the opened photo is read, not downloaded again');
+  // Live bug: "Saving media 943 of 71" — the message count leaked into the media counter.
+  const mediaProgress = page.mock.sent.filter((m) => m.type === 'WAX:PROGRESS' && m.phase === 'media');
+  ok(mediaProgress.length > 1, 'media progress was reported');
+  eq(mediaProgress.filter((m) => m.loaded > m.total).map((m) => `${m.loaded} of ${m.total}`), [], 'never more done than total');
+  eq(mediaProgress[0].loaded, 0, 'the media counter starts at 0');
+  eq(mediaProgress[mediaProgress.length - 1].loaded, 7, 'and ends at the number of items');
   ok(
     result.warnings.some((w) => /^Could not save one image file: WhatsApp could not download it \(not available \(NEED_POKE\)\)/.test(w)),
     'the stuck one is reported: ' + JSON.stringify(result.warnings)
@@ -259,6 +265,21 @@ await checkAsync('a loader that runs but loads nothing gives way to scrolling', 
   const result = await runExport(page, { format: 'json', mediaMode: 'skip' });
   ok(result.ok, JSON.stringify(result.error));
   ok(scrolledToTop > 0, 'switched to scrolling after the loader brought nothing');
+});
+
+await checkAsync('the popup card counts what WhatsApp has loaded, not what is on screen', async () => {
+  // Live: "96 messages loaded" for a chat with 941 loaded (the page renders a window).
+  const page = bootStorePage();
+  const before = await page.mock.dispatch({ type: 'WAX:PING' });
+  eq(before.chat.renderedCount, 11, 'the 11 messages in the store, not the 10 rows on the page');
+  eq(before.chat.isGroup, false);
+  eq(before.chat.fullHistory, false, 'earlier messages remain');
+  ok(before.chat.dateRange && before.chat.dateRange.start < before.chat.dateRange.end, JSON.stringify(before.chat.dateRange));
+  await runExport(page, { format: 'json', mediaMode: 'skip' });
+  const after = await page.mock.dispatch({ type: 'WAX:PING' });
+  eq(after.chat.renderedCount, 13, 'history loaded by the export is counted');
+  eq(after.chat.fullHistory, true, 'and the popup can say it is the whole chat');
+  page.dom.window.close();
 });
 
 process.exit(summary() ? 0 : 1);
