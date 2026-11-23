@@ -4,6 +4,94 @@ All notable changes to **Chat Export for WhatsApp** are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-11-24
+
+### Added
+
+- **Exports read WhatsApp's own message list instead of the screen.** A small script in
+  WhatsApp Web's page (`src/page/bridge.js`) reads the open chat's messages from WhatsApp's
+  in-memory store: exact time, sender, whether you sent it, type, full text, caption,
+  quoted message and reactions, with each album photo as its own message. Older history is
+  loaded by asking WhatsApp for earlier messages (or by scrolling to the top if its loader
+  is not found) until WhatsApp reports the start of the chat. No more scrolling through
+  every screen, and none of the screen-reading problems below.
+- **Media you never opened is downloaded.** With Media set to *Download*, every photo,
+  video, voice note, sticker and document in the export is downloaded through the same flow
+  as clicking it in WhatsApp, including asking your phone to re-send media WhatsApp's
+  servers no longer have. Media WhatsApp still cannot provide is marked as not loaded.
+- `scripts/wa-internals-probe.js` and `scripts/wa-download-probe.js`: read-only DevTools
+  probes of WhatsApp's internal module and field names and of its media download functions,
+  for when WhatsApp changes them.
+
+### Changed
+
+- If WhatsApp's internals cannot be reached, the export falls back to scrolling and reading
+  the page (the fixes below), and says so in a warning.
+- Minimum Chrome version is 111 (needed to run the page script). Permissions are unchanged.
+- The privacy wording no longer says "no network": the extension's own code still makes no
+  requests, but with Media = *Download* WhatsApp's code downloads media from WhatsApp's
+  servers. Nothing is sent to anyone else.
+
+### Fixed
+
+- The popup's chat card counts the messages WhatsApp has loaded (it showed "96 messages
+  loaded" for a 941-message chat, counting only rows on screen), shows the loaded date span,
+  and says "All N messages" once WhatsApp has nothing earlier.
+- The media counter no longer reads "Saving media 943 of 71".
+- TXT, JSON and HTML exports record the date range used and every warning, so a short or
+  incomplete export explains itself without the popup.
+- Media downloads are all started at once and read six at a time, and each has a time limit
+  (30 s, restarted while it makes progress). A download waiting on the phone could stall an
+  export for many minutes, and those waits used to queue three at a time.
+- Refresh in the popup confirms it ran ("Updated"), and when the tab reports no open chat it
+  reconnects to the tab first. After reloading the extension, a fresh copy of the extension's
+  scripts now takes over from the old one instead of quitting, and the "Open a chat" card
+  shows the reason the page gave.
+
+### Fixed (screen-reading path, now the fallback)
+
+- **Messages are no longer exported blank.** WhatsApp keeps messages away from the viewport as
+  empty placeholders and fills them in only when they scroll into view. 1.0.3 collected the
+  placeholders as messages and never read them again: a 932-message export had 883 messages
+  with no author, text or date, and the rest on the wrong days. Placeholders are now left
+  pending, loading always finishes with a downward sweep that waits for each screen to fill
+  in, and any that never do are counted in a warning rather than exported empty.
+- A message without its own timestamp takes the time of the message above it on the page,
+  not of whichever message was parsed last.
+- The success panel lists every warning instead of only "2 warnings" with the text hidden
+  in a tooltip.
+- A one-to-one chat is no longer marked as a group in the export because the user's own
+  messages carry a second name. Incoming messages WhatsApp shows without an author line
+  (deleted messages, some stickers) are attributed to the other person in a one-to-one chat.
+- **Your own messages are recognised again.** WhatsApp no longer puts `.message-out` /
+  `.message-in` on messages, so every message was exported as incoming. Direction now comes
+  from, in order: the old classes, the bubble tail (`tail-out`), delivery ticks, and which
+  side of the list the bubble sits on. If none of those is available in a one-to-one chat,
+  the author who is not the contact is taken to be you, with a warning saying so.
+- **Long and multi-paragraph messages are exported in full.** WhatsApp now splits such a
+  message across many text elements (17 in one live message); only the last one was kept.
+  Every element is read in order, with line breaks between paragraphs, and the first
+  paragraph is no longer mistaken for a quoted reply.
+- Stickers are also recognised by WhatsApp's current `sticker-container` marker.
+- Deleted messages read "This message was deleted" instead of exporting as a blank line.
+- WhatsApp notices that carry a `data-id` (the encryption notice, for example) are exported
+  as system messages. They were counted as unread placeholders, which also caused a false
+  "could not confirm the first message" warning.
+- Media that could not be read is reported once per kind ("Could not read 8 sticker
+  files…") instead of once per file, and the routine "N messages were recovered…" note is
+  gone.
+
+### Tools
+
+- `scripts/wa-probe.js`: paste into DevTools on WhatsApp Web to save a structure-only report
+  (no message text, names, numbers or ids) of the open chat's markup, for diagnosing the
+  next WhatsApp page change.
+
+### Docs
+
+- README: "How it works" describes the two-pass load and placeholders; new Limitations
+  section.
+
 ## [1.0.3] — 2026-11-24
 
 ### Fixed

@@ -11,7 +11,14 @@
 
   var WAEx = (global.WAEx = global.WAEx || {});
 
-  if (WAEx.__contentReady) return;
+  // The newest injection takes over. Reloading the extension leaves the previous copy of
+  // this script in the tab with a dead connection; a plain "already loaded" guard made a
+  // fresh injection quit and kept that dead copy in charge. The old copy's listener
+  // stands down once `__contentInstance` changes. An export still running in a previous
+  // copy keeps it in charge until it finishes.
+  if (WAEx.__contentRunning) return;
+  var instance = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  WAEx.__contentInstance = instance;
   WAEx.__contentReady = true;
 
   var extractor = WAEx.extractor;
@@ -19,6 +26,7 @@
   var media = WAEx.media;
   var dt = WAEx.datetime;
   var zip = WAEx.zip;
+  var internal = WAEx.internal;
   var T = WAEx.MESSAGE_TYPES;
   var PHASE = WAEx.PHASE;
 
@@ -189,6 +197,41 @@
 
   /* ---------------------------------------------------------------- export */
 
+  /** Load history and read every message from WhatsApp's store via the page bridge. */
+  async function exportFromStore(storeInfo, bounds, settings) {
+    var warnings = [];
+    setPhase(PHASE.SCROLLING, 'Loading older messages', { loaded: storeInfo.loaded, percent: null });
+    var loaded = await internal.loadHistory({
+      dateBounds: bounds,
+      canLoadEarlier: storeInfo.canLoadEarlier,
+      shouldCancel: function () {
+        return cancelRequested;
+      },
+      onProgress: function (progress) {
+        var percent = null;
+        var end = bounds.end || Date.now();
+        if (bounds.start && progress.oldest !== null && end > bounds.start) {
+          percent = Math.max(3, Math.min(96, Math.round(((end - progress.oldest) / (end - bounds.start)) * 100)));
+        }
+        reportProgress({ loaded: progress.loaded, percent: percent, detail: 'Loading older messages' });
+      },
+    });
+    warnings = warnings.concat(loaded.warnings);
+    if (cancelRequested) throw cancelledError();
+
+    setPhase(PHASE.PARSING, 'Reading messages', { loaded: loaded.loaded, percent: bounds.start ? 97 : null });
+    var read = await internal.readMessages();
+    warnings = warnings.concat(read.warnings);
+    var messages = read.messages;
+    if (!messages.length) throw new Error('the message list was empty');
+    if (!settings.includeReactions) {
+      messages.forEach(function (m) {
+        m.reactions = [];
+      });
+    }
+    return { messages: messages, warnings: warnings, chatName: read.chatName, isGroup: read.isGroup };
+  }
+
   async function runExport(rawSettings) {
     if (running) {
       throw new extractor.ExportError(
@@ -200,6 +243,7 @@
 
     var settings = WAEx.normalizeSettings(rawSettings);
     running = true;
+    WAEx.__contentRunning = true;
     cancelRequested = false;
 
     lastState = createState({
@@ -233,65 +277,90 @@
 
       setPhase(PHASE.SCROLLING, 'Loading older messages', { loaded: 0, percent: bounds.start ? 2 : null });
 
-      // ---- phase 1: load history -------------------------------------------------
-      history = await extractor.loadAllHistory({
-        dateBounds: bounds,
-        includeReactions: settings.includeReactions,
-        shouldCancel: function () {
-          return cancelRequested;
-        },
-        onProgress: function (progress) {
-          var percent = null;
-          var end = bounds.end || Date.now();
-
-          if (bounds.start && bounds.end) {
-            // Both ends known: progress from the oldest loaded message to the range end.
-            if (progress.newest !== null && bounds.end > bounds.start) {
-              var coveredBoth = (progress.newest - bounds.start) / (bounds.end - bounds.start);
-              percent = Math.max(3, Math.min(96, Math.round(coveredBoth * 100)));
-            }
-          } else if (bounds.start) {
-            if (progress.oldest !== null && end > bounds.start) {
-              var covered = (end - progress.oldest) / (end - bounds.start);
-              percent = Math.max(3, Math.min(96, Math.round(covered * 100)));
-            }
-          }
-
-          var detail = 'Scrolling back through history';
-          if (progress.direction === 'down') {
-            detail = 'Catching up to the newest message';
-          } else if (progress.atTop) {
-            detail = 'Reached the oldest message';
-          }
-
-          reportProgress({
-            loaded: progress.loaded,
-            percent: percent,
-            detail: detail,
-          });
-        },
-      });
-
-      warnings = warnings.concat(history.warnings || []);
+      // ---- phase 1: read WhatsApp's message store (primary) ----------------------
+      var messages = null;
+      var usedStore = false;
+      var storeInfo = await internal.probe();
+      if (storeInfo) {
+        try {
+          var storeResult = await exportFromStore(storeInfo, bounds, settings);
+          messages = storeResult.messages;
+          warnings = warnings.concat(storeResult.warnings);
+          if (storeResult.chatName) chatInfo.name = storeResult.chatName;
+          usedStore = true;
+        } catch (err) {
+          if (cancelRequested) throw cancelledError();
+          warnings.push(
+            "Could not read WhatsApp's message list directly (" +
+              (err && err.message ? err.message : err) +
+              '), so the conversation was read from the screen instead. That is slower and can miss messages.'
+          );
+        }
+      }
       if (cancelRequested) throw cancelledError();
 
-      // ---- phase 2: parse --------------------------------------------------------
-      setPhase(PHASE.PARSING, 'Reading messages', {
-        loaded: history.loaded,
-        percent: bounds.start ? 97 : null,
-      });
-
-      // loadAllHistory parsed every message it saw while scrolling, so messages that
-      // WhatsApp removed from the DOM afterwards are still in the export.
-      var messages = Array.isArray(history.messages) ? history.messages.slice() : null;
+      // ---- fallback: scroll and read the rendered page ---------------------------
       if (!messages) {
-        var parsed = extractor.parseMessages({
-          main: history.main,
-          harvested: history.seen,
+        // ---- phase 1: load history -------------------------------------------------
+        history = await extractor.loadAllHistory({
+          dateBounds: bounds,
           includeReactions: settings.includeReactions,
+          shouldCancel: function () {
+            return cancelRequested;
+          },
+          onProgress: function (progress) {
+            var percent = null;
+            var end = bounds.end || Date.now();
+
+            if (bounds.start && bounds.end) {
+              // Both ends known: progress from the oldest loaded message to the range end.
+              if (progress.newest !== null && bounds.end > bounds.start) {
+                var coveredBoth = (progress.newest - bounds.start) / (bounds.end - bounds.start);
+                percent = Math.max(3, Math.min(96, Math.round(coveredBoth * 100)));
+              }
+            } else if (bounds.start) {
+              if (progress.oldest !== null && end > bounds.start) {
+                var covered = (end - progress.oldest) / (end - bounds.start);
+                percent = Math.max(3, Math.min(96, Math.round(covered * 100)));
+              }
+            }
+
+            var detail = 'Scrolling back through history';
+            if (progress.direction === 'down') {
+              detail = 'Catching up to the newest message';
+            } else if (progress.atTop) {
+              detail = 'Reached the oldest message';
+            }
+
+            reportProgress({
+              loaded: progress.loaded,
+              percent: percent,
+              detail: detail,
+            });
+          },
         });
-        warnings = warnings.concat(parsed.warnings || []);
-        messages = parsed.messages;
+
+        warnings = warnings.concat(history.warnings || []);
+        if (cancelRequested) throw cancelledError();
+
+        // ---- phase 2: parse --------------------------------------------------------
+        setPhase(PHASE.PARSING, 'Reading messages', {
+          loaded: history.loaded,
+          percent: bounds.start ? 97 : null,
+        });
+
+        // loadAllHistory parsed every message it saw while scrolling, so messages that
+        // WhatsApp removed from the DOM afterwards are still in the export.
+        messages = Array.isArray(history.messages) ? history.messages.slice() : null;
+        if (!messages) {
+          var parsed = extractor.parseMessages({
+            main: history.main,
+            harvested: history.seen,
+            includeReactions: settings.includeReactions,
+          });
+          warnings = warnings.concat(parsed.warnings || []);
+          messages = parsed.messages;
+        }
       }
 
       // System messages are collected always; the option only decides whether they ship.
@@ -322,6 +391,7 @@
       if (settings.mediaMode === 'download') {
         var collector = media.createCollector({
           maxBytes: Math.max(1, settings.maxMediaMb) * 1024 * 1024,
+          readInternal: usedStore ? internal.readMedia : null,
           shouldCancel: function () {
             return cancelRequested;
           },
@@ -331,6 +401,7 @@
                 ? Math.round((progress.done / progress.attempted) * 100)
                 : 100;
             reportProgress({
+              loaded: Math.min(progress.done, progress.attempted),
               percent: percent,
               detail:
                 'Saving media ' +
@@ -346,7 +417,20 @@
         }
 
         if (collector.queued > 0) {
-          setPhase(PHASE.MEDIA, 'Saving media', { percent: 0, total: collector.queued });
+          // `loaded` still holds the message count from loading; this phase counts media.
+          setPhase(PHASE.MEDIA, 'Saving media', { percent: 0, loaded: 0, total: collector.queued });
+          if (usedStore) {
+            // Start every download at once; waits on the phone then overlap.
+            await internal.prefetchMedia(
+              messages
+                .filter(function (m) {
+                  return m.media && /^wax-msg:/.test(m.media.url || '');
+                })
+                .map(function (m) {
+                  return m.media.url.slice('wax-msg:'.length);
+                })
+            );
+          }
           mediaResult = await collector.drain();
           warnings = warnings.concat(mediaResult.warnings || []);
           if (cancelRequested) throw cancelledError();
@@ -356,8 +440,46 @@
       // ---- phase 4: build --------------------------------------------------------
       setPhase(PHASE.BUILDING, 'Building file', { percent: null });
 
+      // If the page gave no direction signal at all (WhatsApp dropped the classes it used
+      // to carry), a one-to-one chat still has exactly two authors: the contact, named
+      // like the chat, and the user.
+      if (!messages.some(function (m) { return m.isOutgoing; })) {
+        var names = Object.create(null);
+        messages.forEach(function (m) {
+          if (m.author && m.type !== T.SYSTEM) names[m.author] = true;
+        });
+        var nameList = Object.keys(names);
+        if (nameList.length === 2 && names[chatInfo.name]) {
+          var self = nameList[0] === chatInfo.name ? nameList[1] : nameList[0];
+          messages.forEach(function (m) {
+            if (m.author === self) m.isOutgoing = true;
+          });
+          warnings.push(
+            'WhatsApp did not mark which messages are yours, so they were identified by name ("' +
+              self +
+              '"). Messages without a name line may be shown on the wrong side.'
+          );
+        }
+      }
+
+      // Only other people's names count: the user's own messages carry their own name,
+      // so counting every author makes each one-to-one chat look like a group. Decided
+      // from every exported message, not the few rows on screen when the popup opened.
+      var incomingAuthors = Object.create(null);
+      messages.forEach(function (m) {
+        if (!m.isOutgoing && m.author && m.type !== T.SYSTEM) incomingAuthors[m.author] = true;
+      });
+      var isGroup = Object.keys(incomingAuthors).length > 1;
+
+      // In a one-to-one chat every incoming message is from the other person, including
+      // the ones WhatsApp renders without an author line (deleted messages, stickers).
+      if (!isGroup) {
+        messages.forEach(function (m) {
+          if (!m.isOutgoing && !m.author && m.type !== T.SYSTEM) m.author = chatInfo.name;
+        });
+      }
+
       var stats = formats.summarize(messages);
-      var isGroup = chatInfo.isGroup || stats.authors.length > 1;
 
       var meta = {
         chat: { name: chatInfo.name, isGroup: isGroup },
@@ -366,6 +488,8 @@
         stats: stats,
       };
 
+      // The file carries its own notes (date range, warnings) so it explains itself.
+      meta.warnings = warnings.slice();
       var serialized = formats.serialize(settings.format, messages, meta);
       var baseName = formats.buildBaseName(chatInfo.name, meta.exportedAt);
       var reportFileName = baseName + '.' + serialized.extension;
@@ -439,6 +563,7 @@
       return { ok: false, error: error };
     } finally {
       running = false;
+      WAEx.__contentRunning = false;
       cancelRequested = false;
       if (settings.restoreScroll && history) {
         extractor.restoreScroll(history);
@@ -468,7 +593,12 @@
 
   /* ------------------------------------------------------------- listeners */
 
-  function replyWithChat(sendResponse) {
+  /**
+   * Chat details for the popup. The page only renders a window of messages, so when the
+   * page bridge is available, the count, date span and group flag come from WhatsApp's
+   * message list instead (the popup showed "96 messages loaded" for a 941-message chat).
+   */
+  async function replyWithChat(sendResponse) {
     var chat;
     try {
       chat = extractor.getChatInfo();
@@ -484,6 +614,21 @@
       };
     }
 
+    if (chat.found && !running) {
+      var store = null;
+      try {
+        store = await internal.probe();
+      } catch (err) {
+        store = null; // the page-only details below are still a valid answer
+      }
+      if (store) {
+        chat.renderedCount = store.loaded;
+        chat.isGroup = store.isGroup;
+        chat.fullHistory = Boolean(store.state && store.state.noEarlierMsgs);
+        if (store.oldest && store.newest) chat.dateRange = { start: store.oldest * 1000, end: store.newest * 1000 };
+      }
+    }
+
     sendResponse({
       ok: true,
       chat: chat,
@@ -494,6 +639,7 @@
   }
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (WAEx.__contentInstance !== instance) return false; // a newer copy is in charge
     if (!message || typeof message.type !== 'string') return false;
 
     switch (message.type) {

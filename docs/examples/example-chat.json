@@ -1,6 +1,6 @@
 {
   "schema": "chat-export/v1",
-  "generator": "Chat Export for WhatsApp 1.0.3",
+  "generator": "Chat Export for WhatsApp 1.1.0",
   "exportedAt": "2026-11-18T02:30:00.000Z",
   "chat": {
     "name": "Design Team",

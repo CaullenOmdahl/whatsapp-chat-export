@@ -30,8 +30,9 @@ release and the reporter is credited in the release notes unless they ask otherw
 
 ## What counts as a security issue here
 
-The extension has an unusually small attack surface on purpose: it makes no network
-requests, runs no remote code, and has no server. Reports are welcome for:
+The extension has an unusually small attack surface on purpose: its own code makes no
+network requests (media is downloaded only by WhatsApp's own download manager, at the
+extension's request), runs no remote code, and has no server. Reports are welcome for:
 
 - **Chat data leaving the browser.** Any code path that could transmit message content,
   filenames or metadata off the device.

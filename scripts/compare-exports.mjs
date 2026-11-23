@@ -3,7 +3,7 @@
  * Compares one of this extension's exports against another source's export of the same
  * chat (for example the "Export chat" archive from the WhatsApp phone app).
  *
- *   node scripts/compare-exports.mjs <our-export.zip|.html|.json> <their-export.zip|.txt|.json>
+ *   node scripts/compare-exports.mjs <our-export.zip|.html|.json|.txt> <their-export.zip|.txt|.json>
  *
  * Prints aggregate numbers only: message counts, date ranges, media counts, and how much
  * of one export overlaps the other. Message text is never printed, so this is safe to run
@@ -114,6 +114,37 @@ function parseOurHtml(text) {
   return { messages, kind: 'html' };
 }
 
+/* ------------------------------------------------------------- our text format */
+
+/** `[2026-10-14 14:14:00] Author: text`, continuation lines indented by four spaces. */
+function parseOurText(text) {
+  const messages = [];
+  let current = null;
+  for (const line of text.split('\n')) {
+    const match = line.match(/^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?::\d{2})?\] ?(.*)$/);
+    if (match) {
+      const rest = match[3];
+      const split = rest.match(/^([^:\[]{1,80}):\s?([\s\S]*)$/);
+      current = {
+        at: `${match[1]} ${match[2]}`,
+        sender: split ? split[1] : '',
+        text: split ? split[2] : rest,
+        media: /\[(?:Photo|Video|Audio|Voice message|Document|Sticker|GIF|Contact card|Location|Poll|Attachment)\b/.test(rest),
+        quote: false,
+        reactions: 0,
+      };
+      messages.push(current);
+      continue;
+    }
+    if (!current || !line.startsWith('    ')) continue;
+    const extra = line.slice(4);
+    if (extra.startsWith('> ')) current.quote = true;
+    else if (extra.startsWith('reactions: ')) current.reactions += extra.split(',').length;
+    else current.text += (current.text ? '\n' : '') + extra;
+  }
+  return { messages, kind: 'html' };
+}
+
 /* ------------------------------------------------------- phone text export */
 
 function parsePhoneText(text) {
@@ -185,6 +216,7 @@ function summarise(label, parsed, mediaFiles) {
     quotes: parsed.kind === 'html' ? messages.filter((message) => message.quote).length : 0,
     reactions: parsed.kind === 'html' ? messages.reduce((total, message) => total + message.reactions, 0) : 0,
     multiline: messages.filter((message) => message.text.includes('\n')).length,
+    blank: messages.filter((message) => !message.media && !normalise(message.text)).length,
   };
 }
 
@@ -213,7 +245,9 @@ function main() {
         quote: Boolean(message.quoted),
         reactions: (message.reactions || []).length,
       })) }
-    : parseOurHtml(oursFile.text);
+    : /\.txt$/i.test(oursFile.name)
+      ? parseOurText(oursFile.text)
+      : parseOurHtml(oursFile.text);
 
   const theirs = theirsFile.name.endsWith('.json')
     ? { kind: 'json', messages: JSON.parse(theirsFile.text).messages.map((message) => ({
@@ -265,6 +299,7 @@ function main() {
   console.log('quoted messages  ' + String(oursSummary.quotes).padEnd(29) + theirsSummary.quotes);
   console.log('reactions        ' + String(oursSummary.reactions).padEnd(29) + theirsSummary.reactions);
   console.log('multiline msgs   ' + String(oursSummary.multiline).padEnd(29) + theirsSummary.multiline);
+  console.log('blank msgs       ' + String(oursSummary.blank).padEnd(29) + theirsSummary.blank);
   console.log('');
   console.log(`text messages: ${matched}/${comparable} of the smaller export found verbatim in the larger one (${textCoverage}%).`);
   console.log(`conversation: ${a.messages} of ${b.messages} messages (${coverage}%).`);

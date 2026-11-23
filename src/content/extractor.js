@@ -48,6 +48,12 @@
     downIdleRounds: 3,
     /** Delay between fast downward steps through already-rendered messages. */
     stepDelayMs: 30,
+    /**
+     * WhatsApp keeps messages away from the viewport as empty shells (a data-id and a
+     * height) and fills them in when they scroll into view. After each sweep step, wait
+     * up to this long for the on-screen shells to be filled in.
+     */
+    hydrateTimeoutMs: 1500,
     settleAfterLoadMs: 80,
     /** Absolute ceiling, so a runaway loop cannot exhaust memory. */
     maxMessages: 150000,
@@ -108,6 +114,71 @@
 
     var out = [];
     walk(el, out);
+    return normalize(out.join(''));
+  }
+
+  /**
+   * The message body from its text elements. Current WhatsApp splits a long or
+   * multi-paragraph message across many `.selectable-text` elements (17 in one live
+   * message), so reading only one of them dropped most of the text. With several, walk
+   * their common container in order and keep only text inside them, turning `<br>`
+   * and block boundaries into line breaks.
+   */
+  function readBody(els) {
+    if (!els.length) return '';
+    if (els.length === 1) return readText(els[0]);
+
+    var container = els[0].parentElement;
+    while (container && !els.every(function (el) { return container.contains(el); })) {
+      container = container.parentElement;
+    }
+    if (!container) return readText(els[els.length - 1]);
+
+    var out = [];
+    function isBlock(el) {
+      var tag = (el.tagName || '').toUpperCase();
+      if (tag === 'DIV' || tag === 'P' || tag === 'LI' || tag === 'BLOCKQUOTE') return true;
+      try {
+        var display = global.getComputedStyle(el).display;
+        return display === 'block' || display === 'flex' || display === 'list-item';
+      } catch (err) {
+        return false;
+      }
+    }
+    function newline() {
+      if (out.length && out[out.length - 1] !== '\n') out.push('\n');
+    }
+    function visit(node, inside) {
+      var children = node.childNodes || [];
+      for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (child.nodeType === 3) {
+          if (inside) out.push(child.nodeValue || '');
+          continue;
+        }
+        if (child.nodeType !== 1) continue;
+        var tag = (child.tagName || '').toUpperCase();
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'BUTTON') continue;
+        if (child.getAttribute('role') === 'button' && !child.querySelector('.selectable-text')) continue;
+        var testid = child.getAttribute('data-testid') || '';
+        if (/^(msg-meta|quoted-message|caption-read-more-button|reaction-bubble)/.test(testid)) continue;
+        if (tag === 'BR') {
+          if (inside) out.push('\n');
+          continue;
+        }
+        if (tag === 'IMG') {
+          if (inside && child.getAttribute('alt')) out.push(child.getAttribute('alt'));
+          continue;
+        }
+        var nowInside = inside || els.indexOf(child) !== -1;
+        if (!nowInside && !child.querySelector('.selectable-text')) continue;
+        var block = isBlock(child);
+        if (block) newline();
+        visit(child, nowInside);
+        if (block) newline();
+      }
+    }
+    visit(container, false);
     return normalize(out.join(''));
   }
 
@@ -373,11 +444,47 @@
     if (!node.querySelector) return false;
     if (node.querySelector('.message-out')) return true;
     if (node.querySelector('.message-in')) return false;
-    // No direction class at all: delivery ticks and the pending clock only appear on
-    // messages the user sent.
-    return Boolean(
-      node.querySelector('[data-icon^="msg-check"], [data-icon^="msg-dblcheck"], [data-icon="msg-time"]')
-    );
+    // Current builds (2026-11) dropped the direction classes. The bubble "tail" says it,
+    // but only on the first bubble of a run.
+    if (node.querySelector('[data-testid="tail-out"]')) return true;
+    if (node.querySelector('[data-testid="tail-in"]')) return false;
+    // Delivery ticks and the pending clock only appear on messages the user sent.
+    if (
+      node.querySelector(
+        '[data-icon^="msg-check"], [data-icon^="msg-dblcheck"], [data-icon="msg-time"], ' +
+          '[data-testid^="msg-check"], [data-testid^="msg-dblcheck"], [data-testid="msg-time"]'
+      )
+    ) {
+      return true;
+    }
+    var side = bubbleSide(node);
+    return side === 'right';
+  }
+
+  /**
+   * Which side of the message list a bubble sits on: outgoing bubbles are right-aligned.
+   * Returns 'left', 'right' or '' when layout is unavailable or ambiguous.
+   */
+  function bubbleSide(node) {
+    try {
+      var bubble =
+        node.querySelector('[data-testid="msg-container"]') ||
+        (node.matches && node.matches('[data-id]') ? node : node.querySelector('[data-id]')) ||
+        node;
+      var list = (cache.scroller && cache.scroller.contains(node) && cache.scroller) ||
+        (node.closest && node.closest('div[role="application"]')) ||
+        null;
+      if (!list || !bubble.getBoundingClientRect) return '';
+      var b = bubble.getBoundingClientRect();
+      var c = list.getBoundingClientRect();
+      if (!b.width || !c.width || b.width > c.width * 0.95) return '';
+      var leftGap = b.left - c.left;
+      var rightGap = c.right - b.right;
+      if (Math.abs(leftGap - rightGap) < 24) return '';
+      return rightGap < leftGap ? 'right' : 'left';
+    } catch (err) {
+      return '';
+    }
   }
 
   /* ------------------------------------------------------------ chat info */
@@ -675,6 +782,8 @@
     var startedAtNewest = Boolean(scroller) && originalTop + originalClient >= originalHeight - 8;
 
     var collected = Object.create(null); // message id -> parsed Message
+    var hollow = Object.create(null); // message id -> true while only an empty shell was seen
+    var hollowNodes = []; // shells found by the latest collect()
     var seen = Object.create(null); // message id -> node, kept for recovery/diagnostics
     var parseIndex = 0;
     var ctx = {
@@ -691,20 +800,68 @@
       return measureList(main, scroller);
     }
 
+    /**
+     * Parse every message node not collected yet, in DOM order. Empty shells are left
+     * uncollected so they are parsed again once WhatsApp fills them in. A message with
+     * no timestamp of its own (media, for instance) borrows the one of the message just
+     * above it on the page, not of whatever was parsed last.
+     */
     function collect() {
       var nodes = messageNodes(main);
       var added = 0;
+      ctx.lastTimestamp = null;
+      hollowNodes = [];
       for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
         var id = node.getAttribute('data-id');
-        if (!id || collected[id]) continue;
-        seen[id] = node;
+        if (!id) continue;
+        if (collected[id]) {
+          if (collected[id]._ownTime) ctx.lastTimestamp = collected[id].timestamp;
+          continue;
+        }
         ctx.index = parseIndex++;
         var message = parseRow(node, ctx);
         if (!message) continue;
-        if (message.timestamp) ctx.lastTimestamp = message.timestamp;
+        if (message._hollow) {
+          hollow[id] = true;
+          hollowNodes.push(node);
+          continue;
+        }
+        seen[id] = node;
+        delete hollow[id];
+        if (message._ownTime) ctx.lastTimestamp = message.timestamp;
         collected[id] = message;
         added++;
+      }
+      return added;
+    }
+
+    /** Shells currently inside the viewport (all of them when layout is unavailable). */
+    function visibleHollowCount() {
+      if (!hollowNodes.length) return 0;
+      var box = scroller && scroller.getBoundingClientRect ? scroller.getBoundingClientRect() : null;
+      var count = 0;
+      for (var i = 0; i < hollowNodes.length; i++) {
+        var node = hollowNodes[i];
+        if (!node.isConnected) continue;
+        var rect = node.getBoundingClientRect ? node.getBoundingClientRect() : null;
+        if (!box || !rect || (!box.height && !rect.height)) {
+          count++;
+          continue;
+        }
+        if (rect.bottom >= box.top && rect.top <= box.bottom) count++;
+      }
+      return count;
+    }
+
+    /** Collect, then give on-screen shells time to be filled in. */
+    async function collectHydrated() {
+      var added = collect();
+      var waited = 0;
+      while (visibleHollowCount() > 0 && waited < LIMITS.hydrateTimeoutMs && !shouldCancel()) {
+        await sleep(LIMITS.pollMs);
+        waited += LIMITS.pollMs;
+        added += collect();
       }
       return added;
     }
@@ -881,12 +1038,16 @@
       }
     }
 
-    /* ---------------------------------------------------- pass 2: newer */
+    /* ------------------------------------------- pass 2: sweep down, newer */
 
-    // Only needed when the conversation was not already at its newest message. If it
-    // was, pass 1 loaded everything above and the bottom is unchanged.
-    if (scroller && !cancelled && !startedAtNewest && !endDateCovered()) {
+    // Always walk the loaded history from the top, a viewport at a time: WhatsApp only
+    // fills in messages that come on screen, so jumping to the top in pass 1 leaves
+    // everything in between as empty shells. If the conversation did not start at its
+    // newest message, keep loading below the bottom until nothing newer arrives.
+    if (scroller && !cancelled) {
       var idleAtBottom = 0;
+      if ((scroller.scrollTop || 0) > 0) scroller.scrollTop = 0;
+      parsedCount += await collectHydrated();
 
       while (!finished()) {
         var remaining =
@@ -894,6 +1055,9 @@
         var atBottom = remaining <= 4;
 
         if (atBottom) {
+          // Started at the newest message: the bottom is already known.
+          if (startedAtNewest) break;
+          if (endDateCovered()) break;
           var baselineDown = listMetrics();
           nudgeScroll(scroller, 'down');
           var changeDown = await waitForDomChange(scroller, baselineDown);
@@ -920,12 +1084,11 @@
           nudgeScroll(scroller, 'down');
           await sleep(LIMITS.stepDelayMs);
 
-          var addedStep = collect();
+          var addedStep = await collectHydrated();
           parsedCount += addedStep;
           rounds++;
           report('down');
           idleAtBottom = 0;
-          if (endDateCovered()) break;
         }
       }
     }
@@ -938,15 +1101,37 @@
       main: main,
       harvested: seen,
       includeReactions: opts.includeReactions,
+      // Recovering nodes that scrolled away is how loading works, not a problem.
+      reportRecovered: false,
     });
-    var merged = domResult.messages.slice();
+    // DOM order of the final pass first, then anything collected while scrolling that is
+    // no longer rendered. Collected copies win: they were parsed in page order, so their
+    // borrowed timestamps come from the right neighbour.
+    var merged = [];
     var known = Object.create(null);
-    for (var i = 0; i < merged.length; i++) known[merged[i].id] = true;
+    for (var i = 0; i < domResult.messages.length; i++) {
+      var domMessage = domResult.messages[i];
+      merged.push(collected[domMessage.id] || domMessage);
+      known[domMessage.id] = true;
+    }
     for (var id in collected) {
       if (!hasOwn(collected, id) || known[id]) continue;
       merged.push(collected[id]);
+      known[id] = true;
     }
     merged = backfillAndSort(merged);
+
+    var unread = 0;
+    for (var hollowId in hollow) {
+      if (hasOwn(hollow, hollowId) && !known[hollowId]) unread++;
+    }
+    if (unread > 0) {
+      warnings.push(
+        WAEx.plural(unread, 'message') +
+          ' could not be read because WhatsApp never filled in their content. ' +
+          'Keep the WhatsApp tab in the foreground while exporting, then export again.'
+      );
+    }
 
     warnings = warnings.concat(domResult.warnings || []);
     if (cancelled) warnings.push('Export cancelled while messages were still loading.');
@@ -987,7 +1172,11 @@
   function startOfChatVisible(main) {
     var rows = getRows(main);
     for (var i = 0; i < rows.length && i < 6; i++) {
-      if (rowMessageId(rows[i])) return false;
+      if (rowMessageId(rows[i])) {
+        // Current builds give notices a data-id as well.
+        var parsed = parseRow(rows[i], { includeReactions: false });
+        return Boolean(parsed && parsed.type === T.SYSTEM);
+      }
       if (isSystemRow(rows[i])) return true;
     }
     return false;
@@ -1054,6 +1243,7 @@
     // Stickers are images with a sticker marker; check before generic images.
     var sticker =
       row.querySelector('[data-testid="sticker"]') ||
+      row.querySelector('[data-testid="sticker-container"]') ||
       row.querySelector('img[alt*="sticker" i]') ||
       row.querySelector('img[class*="sticker" i]');
     if (sticker) {
@@ -1190,9 +1380,11 @@
     var quoteRoot = firstMatch(row, SELECTORS.quote);
 
     if (!quoteRoot && textEls.length >= 2) {
-      // Two selectable-text blocks inside one message means quote-then-body.
+      // Older builds: a clickable block holding the first text element is the quote.
+      // Not just any parent: current builds split one long message across many text
+      // elements, and its first paragraph is not a quote.
       var first = textEls[0];
-      var candidate = first.closest('div[role="button"]') || first.parentElement;
+      var candidate = first.closest('div[role="button"]');
       if (candidate && candidate !== row) {
         var nestedTexts = candidate.querySelectorAll('.selectable-text');
         if (nestedTexts.length <= 1) quoteRoot = candidate;
@@ -1281,6 +1473,7 @@
     var pre = preEl ? dt.parsePrePlainText(preEl.getAttribute('data-pre-plain-text')) : null;
 
     var timestamp = null;
+    var ownTime = false;
     var timeText = '';
     var author = '';
 
@@ -1289,6 +1482,7 @@
       author = pre.author;
       var dateParts = dt.parseDateText(pre.dateText, ctx.order || 'dmy');
       timestamp = dt.toEpoch(dateParts, dt.parseTimeText(pre.timeText));
+      ownTime = timestamp !== null;
       if (timestamp === null && ctx.lastTimestamp) timestamp = ctx.lastTimestamp;
     } else if (ctx.lastTimestamp) {
       timestamp = ctx.lastTimestamp;
@@ -1297,13 +1491,13 @@
     var textEls = row.querySelectorAll ? Array.prototype.slice.call(row.querySelectorAll('.selectable-text')) : [];
     var quote = findQuote(row, textEls);
 
-    var bodyText = '';
-    for (var i = textEls.length - 1; i >= 0; i--) {
-      var el = textEls[i];
-      if (quote && quote.isRoot && quote.isRoot.contains(el)) continue;
-      bodyText = readText(el);
-      if (bodyText) break;
-    }
+    var bodyEls = textEls.filter(function (el) {
+      if (quote && quote.isRoot && quote.isRoot.contains(el)) return false;
+      // Keep only outermost text elements; nested ones are read through their parent.
+      var parent = el.parentElement;
+      return !(parent && parent.closest && parent.closest('.selectable-text'));
+    });
+    var bodyText = readBody(bodyEls);
 
     var media = detectMedia(row);
     var reactions = ctx.includeReactions === false ? [] : findReactions(row);
@@ -1322,6 +1516,25 @@
     else if (media) type = media.kind || T.UNKNOWN;
     else if (quote && !bodyText) type = T.UNKNOWN;
     if (type === T.TEXT && !bodyText) type = T.UNKNOWN;
+
+    // Deleted bubbles have no selectable text; say so instead of exporting a blank line.
+    if (deleted && !bodyText) {
+      bodyText = isOutgoing ? 'You deleted this message' : 'This message was deleted';
+    }
+
+    // Nothing message-like but readable text and no copyable body: a WhatsApp notice
+    // (encryption, security code, contact changes). Current builds give these a
+    // data-id too, so they would otherwise look like unfilled placeholders.
+    var hollowCandidate = Boolean(messageId) && !pre && !bodyText && !media && !quote && !reactions.length;
+    var noticeText = '';
+    if (hollowCandidate && !(row.querySelector && row.querySelector('.copyable-text'))) {
+      noticeText = readText(row);
+      if (noticeText.length > 400) noticeText = '';
+    }
+    if (noticeText) {
+      type = T.SYSTEM;
+      bodyText = noticeText;
+    }
 
     return {
       id: messageId || 'row_' + (ctx.index || 0),
@@ -1346,6 +1559,9 @@
           }
         : null,
       _quoteRoot: quote ? quote.isRoot : null,
+      _ownTime: ownTime,
+      // An off-screen placeholder WhatsApp has not filled in yet: nothing to export.
+      _hollow: hollowCandidate && !noticeText,
     };
   }
 
@@ -1424,7 +1640,7 @@
         seenIds[harvId] = true;
         orphanCount++;
       }
-      if (orphanCount > 0) {
+      if (orphanCount > 0 && opts.reportRecovered !== false) {
         warnings.push(
           orphanCount + ' message(s) were recovered from nodes that left the screen while scrolling.'
         );
@@ -1443,6 +1659,8 @@
     for (var c = 0; c < candidates.length; c++) {
       ctx.index = c;
       var parsed = parseRow(candidates[c], ctx);
+      // Unfilled placeholders: loadAllHistory reports the ones never resolved.
+      if (parsed && parsed._hollow) continue;
       if (parsed) {
         if (parsed.timestamp) ctx.lastTimestamp = parsed.timestamp;
         messages.push(parsed);

@@ -19,7 +19,13 @@ export const LIB_FILES = [
   'src/lib/formats.js',
 ];
 
-export const CONTENT_FILES = [...LIB_FILES, 'src/content/extractor.js', 'src/content/media.js'];
+export const CONTENT_FILES = [
+  ...LIB_FILES,
+  'src/content/extractor.js',
+  'src/content/media.js',
+  'src/content/page-bridge.js',
+  'src/content/internal.js',
+];
 
 let failures = 0;
 let checks = 0;
@@ -251,14 +257,15 @@ export function makeChrome(window, options = {}) {
             resolve(value);
           }
         };
+        let keepAlive = false;
         for (const listener of listeners) {
-          const keepAlive = listener(message, { id: 'test' }, sendResponse);
-          void keepAlive;
+          if (listener(message, { id: 'test' }, sendResponse) === true) keepAlive = true;
         }
-        // Handler may be synchronous or choose to answer later.
+        // Like Chrome: a listener that returned true may answer later; otherwise the
+        // channel closes once the listeners have run.
         setTimeout(() => {
           if (!answered) resolve(undefined);
-        }, 0);
+        }, keepAlive ? 10000 : 0);
       });
     },
   };
@@ -321,6 +328,7 @@ export function fastHistoryLimits(window) {
   limits.growthTimeoutMs = 60;
   limits.growthHardCapMs = 120;
   limits.topIdleRounds = 1;
+  limits.hydrateTimeoutMs = 40;
   limits.activityQuietMs = 20;
   limits.pollMs = 10;
   limits.settleAfterLoadMs = 0;

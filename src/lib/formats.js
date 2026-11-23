@@ -138,6 +138,22 @@
 
   /* ------------------------------------------------------------------ text */
 
+  /**
+   * The export's own notes: which date range was asked for, and every warning. Written into
+   * the file so a short or incomplete export explains itself without the popup.
+   */
+  function rangeLabel(settings) {
+    var s = settings || {};
+    if (s.dateRange === 'custom') {
+      return 'Custom (' + (s.customStart || 'beginning') + ' to ' + (s.customEnd || 'now') + ')';
+    }
+    var presets = WAEx.DATE_RANGES || [];
+    for (var i = 0; i < presets.length; i++) {
+      if (presets[i].id === s.dateRange) return presets[i].label;
+    }
+    return 'All time';
+  }
+
   function toText(messages, meta) {
     var dt = WAEx.datetime;
     var stats = meta.stats || summarize(messages);
@@ -152,6 +168,12 @@
     );
     if (stats.range) {
       lines.push('Conversation dates: ' + dt.formatRange(stats.range));
+    }
+    lines.push('Date range: ' + rangeLabel(meta.settings));
+    var notes = Array.isArray(meta.warnings) ? meta.warnings : [];
+    if (notes.length) {
+      lines.push('Warnings:');
+      for (var w = 0; w < notes.length; w++) lines.push('  - ' + String(notes[w]).replace(/\s*\n\s*/g, ' '));
     }
     lines.push(new Array(56).join('-'));
     lines.push('');
@@ -296,7 +318,9 @@
         includeSystem: meta.settings ? meta.settings.includeSystem : false,
         includeReactions: meta.settings ? meta.settings.includeReactions : true,
         dateRange: meta.settings ? meta.settings.dateRange : 'all',
+        dateRangeLabel: rangeLabel(meta.settings),
       },
+      warnings: Array.isArray(meta.warnings) ? meta.warnings.map(String) : [],
       stats: {
         total: stats.total,
         incoming: stats.incoming,
@@ -542,6 +566,13 @@
         escapeHtml(stats.total) +
         ' messages.'
     );
+    html.push('<br>Date range: ' + escapeHtml(rangeLabel(settings)) + '.');
+    var htmlNotes = Array.isArray(meta.warnings) ? meta.warnings : [];
+    if (htmlNotes.length) {
+      html.push('<br>Warnings:<ul class="notes">');
+      for (var n = 0; n < htmlNotes.length; n++) html.push('<li>' + escapeHtml(htmlNotes[n]) + '</li>');
+      html.push('</ul>');
+    }
     html.push('<br>Not affiliated with, endorsed by, or sponsored by WhatsApp LLC or Meta.');
     html.push('</footer>');
     html.push('</div>');

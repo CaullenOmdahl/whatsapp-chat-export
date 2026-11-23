@@ -325,7 +325,7 @@
         reject(new Error('The scripting permission is unavailable.'));
         return;
       }
-      try {
+      function injectIsolated() {
         chrome.scripting.executeScript(
           { target: { tabId: tabId }, files: WAEx.CONTENT_FILES },
           function () {
@@ -336,8 +336,27 @@
             resolve();
           }
         );
+      }
+      try {
+        // The page bridge first, in WhatsApp's own world. Best effort: without it the
+        // export falls back to reading the screen.
+        chrome.scripting.executeScript(
+          { target: { tabId: tabId }, files: WAEx.PAGE_FILES || [], world: 'MAIN' },
+          function () {
+            void chrome.runtime.lastError;
+            try {
+              injectIsolated();
+            } catch (err) {
+              reject(err);
+            }
+          }
+        );
       } catch (err) {
-        reject(err);
+        try {
+          injectIsolated();
+        } catch (inner) {
+          reject(inner);
+        }
       }
     });
   }
@@ -531,7 +550,7 @@
         el('span', { text: 'Files are created on your device. Nothing is uploaded.' }),
       ]),
       el('div', { className: 'footer-row' }, [
-        el('span', { className: 'privacy-sub', text: 'No network · No analytics' }),
+        el('span', { className: 'privacy-sub', text: 'Nothing uploaded · No analytics' }),
         dom.footerDiagButton,
       ]),
     ]);
@@ -1046,6 +1065,9 @@
     );
   }
 
+  /** How long the card says "Updated" after a refresh. */
+  var REFRESHED_NOTE_MS = 3000;
+
   function renderChatCard() {
     clear(dom.chatCard);
     var chat = state.chat;
@@ -1058,7 +1080,13 @@
       dom.chatCard.appendChild(
         el('div', { className: 'chat-body' }, [
           el('p', { className: 'chat-empty-title', text: 'Open a chat in WhatsApp Web to get started' }),
-          el('p', { className: 'chat-empty-hint', text: 'Click any conversation, then reopen this popup.' }),
+          el('p', {
+            className: 'chat-empty-hint',
+            // The page says why it found no chat; show it, so "I am in the chat" can be diagnosed.
+            text:
+              (chat && chat.reason ? chat.reason : 'Click any conversation, then reopen this popup.') +
+              (justRefreshed() ? ' (Checked again just now.)' : ''),
+          }),
         ])
       );
       dom.chatCard.appendChild(buildRefreshButton());
@@ -1077,22 +1105,32 @@
       el('span', { className: 'chat-name', title: name, text: name }),
       el('span', { className: 'badge', text: chat.isGroup ? 'Group' : 'Direct' }),
     ]);
-    var metaText = chatMetaText(chat);
+    var metaText = chatMetaText(chat) + (justRefreshed() ? ' · Updated' : '');
     dom.chatCard.appendChild(avatar);
     dom.chatCard.appendChild(
       el('div', { className: 'chat-body' }, [
         titleRow,
-        el('p', { className: 'chat-meta', title: metaText, text: metaText }),
+        el('p', { className: 'chat-meta', title: metaText, text: metaText, 'aria-live': 'polite' }),
       ])
     );
     dom.chatCard.appendChild(buildRefreshButton());
+  }
+
+  /** A refresh finished in the last few seconds: say so, or the button looks inert. */
+  function justRefreshed() {
+    return Boolean(state.refreshedAt && Date.now() - state.refreshedAt < REFRESHED_NOTE_MS);
   }
 
   function chatMetaText(chat) {
     var count = Number(chat.renderedCount) || 0;
     var range = formatChatRange(chat.dateRange);
     if (!count) return 'No messages loaded yet';
-    var parts = [fmtNum(count) + ' ' + pluralMessages(count) + ' loaded'];
+    // fullHistory: WhatsApp reports nothing earlier to load, so this is the whole chat.
+    var parts = [
+      chat.fullHistory
+        ? 'All ' + fmtNum(count) + ' ' + pluralMessages(count)
+        : fmtNum(count) + ' ' + pluralMessages(count) + ' loaded',
+    ];
     if (range) parts.push(range);
     return parts.join(' · ');
   }
@@ -1332,11 +1370,17 @@
     }
     if (warnings.length) {
       children.push(
-        el('p', { className: 'success-warn', title: warnings.join('\n') }, [
+        el('p', { className: 'success-warn' }, [
           icon('alert'),
           el('span', { text: fmtNum(warnings.length) + (warnings.length === 1 ? ' warning' : ' warnings') }),
         ])
       );
+      // Spell the warnings out: they say what may be missing from the file and what to do.
+      var warningList = el('ul', { className: 'warning-list success-warning-list' });
+      warnings.forEach(function (warning) {
+        warningList.appendChild(el('li', { text: String(warning) }));
+      });
+      children.push(warningList);
     }
 
     var againButton = el('button', { type: 'button', className: 'btn btn-primary' }, [
@@ -1472,6 +1516,7 @@
       isGroup: !!raw.isGroup,
       initials: typeof raw.initials === 'string' ? raw.initials : '',
       renderedCount: Number(raw.renderedCount) || 0,
+      fullHistory: raw.fullHistory === true,
       dateRange: range,
       reason: typeof raw.reason === 'string' ? raw.reason : '',
     };
@@ -1774,7 +1819,20 @@
     try {
       var reply = await sendToContent(state.tabId, { type: WAEx.MSG.PING, scan: true });
       if (!isPingReply(reply)) throw new Error('No chat snapshot returned.');
+      if (!reply.chat || !reply.chat.found) {
+        // The tab answered but sees no chat: possibly a copy of the extension left over from
+        // before a reload. Re-run the scripts in the tab (the newest copy takes over), then ask
+        // again. Normally only reloading the WhatsApp tab does this.
+        try {
+          await injectContentFiles(state.tabId);
+          var again = await sendToContent(state.tabId, { type: WAEx.MSG.PING, scan: true });
+          if (isPingReply(again)) reply = again;
+        } catch (reconnectErr) {
+          /* keep the first answer */
+        }
+      }
       applyPingReply(reply);
+      state.refreshedAt = Date.now();
     } catch (err) {
       try {
         var retryReply = await ensureContentScript(state.tabId);
@@ -1786,6 +1844,11 @@
     } finally {
       state.refreshing = false;
       render();
+      if (state.refreshedAt) {
+        setTimeout(function () {
+          if (!state.refreshing) renderChatCard();
+        }, REFRESHED_NOTE_MS + 50);
+      }
     }
   }
 

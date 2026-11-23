@@ -11,7 +11,7 @@
   var WAEx = (global.WAEx = global.WAEx || {});
 
   /** Extension version, mirrored in manifest.json. */
-  WAEx.VERSION = '1.0.3';
+  WAEx.VERSION = '1.1.0';
 
   /** Bump when the persisted settings shape changes. */
   WAEx.SETTINGS_VERSION = 1;
@@ -27,8 +27,16 @@
     'src/lib/formats.js',
     'src/content/extractor.js',
     'src/content/media.js',
+    'src/content/page-bridge.js',
+    'src/content/internal.js',
     'src/content/content.js',
   ];
+
+  /**
+   * Scripts that run in WhatsApp's own page world (manifest `world: "MAIN"`), where its
+   * message store and download manager live. See src/page/bridge.js.
+   */
+  WAEx.PAGE_FILES = ['src/page/bridge.js'];
 
   /** storage.local key holding the user's saved options. */
   WAEx.STORAGE_KEY = 'wax:settings';

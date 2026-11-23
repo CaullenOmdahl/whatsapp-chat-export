@@ -595,4 +595,178 @@ check('without direction classes, delivery ticks mark outgoing messages', () => 
   eq(parsed.find((m) => m.id === '3EB0AAA1C0FFEE').isOutgoing, false);
 });
 
+suite('extractor: off-screen placeholders (v1.0.3 live failure)');
+
+/**
+ * Live WhatsApp (2026-11) keeps messages away from the viewport as empty shells: the
+ * data-id node with no timestamp attribute, text or media. It fills them in shortly
+ * after they scroll into view. v1.0.3 collected the shells as empty messages and never
+ * looked again: 883 of 932 exported messages had no author, text or date.
+ */
+await checkAsync('shells are not exported empty; the sweep fills every message in', async () => {
+  const env = boot(buildFixtureHtml({ rows: conversationRows().map(opaque) }));
+  env.WAEx.extractor.LIMITS.hydrateTimeoutMs = 300;
+  const scroller = env.scroller;
+  const ROW = 100;
+  const nodes = Array.from(env.document.querySelectorAll('#main div[data-id]'));
+  const full = new Map(nodes.map((n) => [n, n.innerHTML]));
+  scroller.__scrollHeight = nodes.length * ROW;
+  scroller.__clientHeight = 300;
+
+  const render = (top) => {
+    nodes.forEach((node, i) => {
+      const visible = i * ROW + ROW > top && i * ROW < top + 300;
+      if (!visible) node.innerHTML = '';
+      else if (!node.innerHTML) setTimeout(() => (node.innerHTML = full.get(node)), 20);
+    });
+  };
+  scroller.__scrollTop = nodes.length * ROW - 300; // opened at the newest message
+  render(scroller.__scrollTop);
+  await new Promise((r) => setTimeout(r, 40));
+  scroller.__onScrollTop = (value) => render(value);
+
+  const result = await env.WAEx.extractor.loadAllHistory();
+  const messages = result.messages.filter((m) => m.id.startsWith('3EB0'));
+  eq(
+    messages.map((m) => m.id),
+    ['AAA1', 'AAA2', 'AAA3', 'AAA4', 'AAA5', 'AAA6', 'AAA7', 'BBB1', 'BBB2', 'BBB3'].map((t) => `3EB0${t}C0FFEE`),
+    'every message, in order'
+  );
+  eq(messages.filter((m) => !m.author).length, 0, 'every message has an author');
+  eq(messages.filter((m) => m.timestamp === null).length, 0, 'every message has a time');
+  eq(byIdOf(messages, 'BBB1').timestamp, AT(2023, 12, 25, 18, 0), 'times come from the message itself');
+  eq(byIdOf(messages, 'AAA2').text, "Perfect.\nI'll bring coffee ☕");
+  ok(!result.warnings.some((w) => /never filled in/.test(w)), JSON.stringify(result.warnings));
+});
+
+await checkAsync('shells that are never filled in are reported, not exported', async () => {
+  const env = boot(buildFixtureHtml({ rows: conversationRows().map(opaque) }));
+  const shells = Array.from(env.document.querySelectorAll('#main div[data-id]')).slice(0, 3);
+  for (const node of shells) node.innerHTML = '';
+  const result = await env.WAEx.extractor.loadAllHistory();
+  eq(result.messages.filter((m) => m.id.startsWith('3EB0')).length, 7, 'shells are left out');
+  ok(
+    result.warnings.some((w) => /^3 messages could not be read/.test(w)),
+    'expected an unread-messages warning: ' + JSON.stringify(result.warnings)
+  );
+});
+
+function byIdOf(list, tail) {
+  return list.find((m) => m.id === `3EB0${tail}C0FFEE`);
+}
+
+suite('extractor: notices, deleted messages and media warnings (v1.0.4 live export)');
+
+const noticeWithId = `
+  <div role="row">
+    <div class="x1n2onr6" data-id="3EB0NOTICE01">
+      <div class="x1rg5ohu"><span class="_11JPr">Messages and calls are end-to-end encrypted.</span></div>
+    </div>
+  </div>`;
+
+await checkAsync('a notice that carries a data-id is a system message, not an unread placeholder', async () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .filter((row) => !/end-to-end encrypted/.test(row));
+  rows.splice(1, 0, noticeWithId);
+  const env = boot(buildFixtureHtml({ rows }));
+  const result = await env.WAEx.extractor.loadAllHistory();
+  const notice = result.messages.find((m) => m.id === '3EB0NOTICE01');
+  ok(notice, 'the notice is exported');
+  eq(notice.type, 'system');
+  eq(result.warnings, [], 'no unread or start-of-chat warnings');
+});
+
+check('a deleted message says so instead of exporting a blank line', () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .map((row) =>
+      /BBB2/.test(row)
+        ? row.replace(/<div class="copyable-text"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/, '<span>This message was deleted</span></div></div>')
+        : row
+    );
+  const env = boot(buildFixtureHtml({ rows }));
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  const deleted = parsed.find((m) => m.id === '3EB0BBB2C0FFEE');
+  eq(deleted.type, 'deleted');
+  eq(deleted.text, 'This message was deleted');
+});
+
+await checkAsync('media that cannot be read is one warning per kind, not one per file', async () => {
+  const env = boot(buildFixtureHtml());
+  const collector = env.WAEx.media.createCollector({ maxBytes: 1e9 });
+  for (let i = 0; i < 3; i++) {
+    collector.enqueue({ media: { kind: 'sticker', url: `blob:https://web.whatsapp.com/gone-${i}` } });
+  }
+  const result = await collector.drain();
+  eq(result.warnings.length, 1, JSON.stringify(result.warnings));
+  ok(/^Could not save 3 sticker files: .*\(HTTP 404\)/.test(result.warnings[0]), result.warnings[0]);
+});
+
+suite('extractor: direction without .message-out (live 2026-11)');
+
+check('the bubble tail marks an outgoing message', () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .map((row) => row.replace(/message-(?:out|in) /, ''))
+    .map((row) => (/AAA3/.test(row) ? row.replace('<div class="_amk6">', '<div class="_amk6"><span data-testid="tail-out"></span>') : row));
+  const env = boot(buildFixtureHtml({ rows }));
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  eq(parsed.find((m) => m.id === '3EB0AAA3C0FFEE').isOutgoing, true);
+  eq(parsed.find((m) => m.id === '3EB0AAA1C0FFEE').isOutgoing, false);
+});
+
+check('a right-aligned bubble is outgoing when nothing else says so', () => {
+  const rows = conversationRows().map(opaque).map((row) => row.replace(/message-(?:out|in) /, ''));
+  const env = boot(buildFixtureHtml({ rows }));
+  const app = env.document.querySelector('div[role="application"]');
+  const rect = (left, right) => () => ({ left, right, width: right - left, top: 0, bottom: 50, height: 50 });
+  app.getBoundingClientRect = rect(0, 1000);
+  for (const node of env.document.querySelectorAll('#main div[data-id]')) {
+    const out = /AAA3|AAA5|AAA6|BBB1/.test(node.getAttribute('data-id'));
+    node.getBoundingClientRect = out ? rect(600, 990) : rect(10, 400);
+  }
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  eq(parsed.filter((m) => m.isOutgoing).map((m) => m.id.slice(4, 8)), ['AAA3', 'AAA5', 'AAA6', 'BBB1']);
+});
+
+suite('extractor: long messages split across text elements (probe 2026-11)');
+
+const splitMessage = (id, paragraphs) => `
+  <div role="row">
+    <div class="_amk4">
+      <div data-id="${id}" data-testid="conv-msg-${id}">
+        <div data-testid="msg-container">
+          <div class="copyable-text" data-pre-plain-text="[9:40 AM, 11/13/2023] Bob: ">
+            <div class="_akbu">
+              ${paragraphs}
+            </div>
+            <div role="button" data-testid="caption-read-more-button">Read more</div>
+          </div>
+          <div data-testid="msg-meta"><span>9:40 AM</span></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+check('every paragraph of a split message is kept, in order, without a fake quote', () => {
+  const paragraphs = ['First point.', 'Second point.', 'Third point.']
+    .map((t) => `<div><span class="selectable-text copyable-text" dir="ltr"><span>${t}</span></span></div>`)
+    .join('');
+  const env = boot(buildFixtureHtml({ rows: [splitMessage('3EB0LONG01', paragraphs)] }));
+  const message = env.WAEx.extractor.parseMessages({}).messages.find((m) => m.id === '3EB0LONG01');
+  eq(message.text, 'First point.\nSecond point.\nThird point.');
+  eq(message.quoted, null, 'the first paragraph is not a quote');
+});
+
+check('inline pieces of one line (a link inside a sentence) stay on one line', () => {
+  const line =
+    '<div><span class="selectable-text copyable-text" dir="ltr"><span>See </span></span>' +
+    '<a href="https://example.com"><span class="selectable-text copyable-text">example.com</span></a>' +
+    '<span class="selectable-text copyable-text"><span> for details</span></span></div>';
+  const env = boot(buildFixtureHtml({ rows: [splitMessage('3EB0LINK01', line)] }));
+  const message = env.WAEx.extractor.parseMessages({}).messages.find((m) => m.id === '3EB0LINK01');
+  eq(message.text, 'See example.com for details');
+});
+
 process.exit(summary() ? 0 : 1);

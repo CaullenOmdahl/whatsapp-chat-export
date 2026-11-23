@@ -6,8 +6,11 @@ auditing what it does with their data. The authoritative technical contract is
 
 ## Design constraints
 
-1. **Local only.** No network requests, no remote code, no account. Chat content is read from the
-   page, assembled in memory and written to a local file.
+1. **Local only.** The extension's own code makes no network requests, runs no remote code and has
+   no account. Chat content is read from the page and WhatsApp's in-memory store, assembled in
+   memory and written to a local file. Nothing is uploaded; the only network activity is WhatsApp's
+   own download manager fetching media from WhatsApp's servers at the extension's request, and only
+   when media handling is *Download*.
 2. **Fail soft.** WhatsApp Web is a moving target. A selector that stops matching must produce a
    warning and a degraded export, never an exception that loses the whole run.
 3. **No build step.** Classic scripts on a single `WAEx` global, loaded in dependency order by
@@ -16,6 +19,7 @@ auditing what it does with their data. The authoritative technical contract is
 4. **The popup is disposable.** The popup can be closed at any moment; the export lives in the
    WhatsApp tab and mirrors its progress to session storage.
 5. **Minimal permissions.** `storage`, `scripting`, `activeTab`, and `https://web.whatsapp.com/*`.
+   Chrome 111 or newer is required for the `"world": "MAIN"` content script.
 
 ## The three contexts
 
@@ -57,10 +61,13 @@ auditing what it does with their data. The authoritative technical contract is
    the number of currently rendered message rows and any in-flight export state.
 2. **The user picks settings and clicks Export chat.** The popup normalises the settings against
    `WAEx.DEFAULT_SETTINGS`, saves them to `chrome.storage.local`, and sends `WAX:EXPORT`.
-3. **The content script acknowledges immediately** and begins the scroll phase. Progress arrives
+3. **The content script acknowledges immediately** and begins loading history. By default this
+   goes through the page bridge (see [Page bridge and message store](#page-bridge-and-message-store));
+   steps 4 and 5 below describe the screen-reading fallback used when the bridge cannot reach
+   WhatsApp's internals. Progress arrives
    in the popup as `WAX:PROGRESS` broadcasts, and is mirrored to `chrome.storage.session` under
    `wax:state`.
-4. **Scroll phase, two passes.** The extractor first walks **backwards**: repeatedly scrolling the
+4. **Scroll phase, two passes (fallback).** The extractor first walks **backwards**: repeatedly scrolling the
    message-list container to the top and waiting for the previous page to render. WhatsApp loads
    older pages on scroll, so each round gains a chunk. Newly seen rows are parsed **immediately**
    and stored in an id → message map, which keeps them even if WhatsApp removes their nodes later
@@ -80,16 +87,18 @@ auditing what it does with their data. The authoritative technical contract is
    - a safety cap is hit (**4000** scroll rounds, a **10-minute** time budget or **150,000**
      messages), which produces a warning, or
    - the user presses Cancel.
-5. **Parse phase.** The parsed map from the scroll phase is the primary source. A final DOM pass
+5. **Parse phase (fallback).** The parsed map from the scroll phase is the primary source. A final DOM pass
    adds system notices and anything rendered after the last harvest, then the two are merged by
    `data-id`, timestamps are backfilled for untimed system rows, and the list is sorted. For each
    message the extractor reads the message text and metadata,
    determines the message type, parses the timestamp, picks up sender name, quoted message and
    reactions, resolves media descriptors, and then applies the options: system-message filter,
    date-range filter and reaction handling.
-6. **Media phase** (only when media handling is *Download*). Each capturable media item is fetched
-   from the page's already-loaded `blob:`/`data:` URL (never the network) and added to the in-memory
-   ZIP under `media/`, subject to the media cap. Items that cannot be fetched are flagged `missing`.
+6. **Media phase** (only when media handling is *Download*). On the store path, each media item in
+   the exported range is downloaded and decrypted by WhatsApp's own download manager through the
+   page bridge and added to the in-memory ZIP under `media/`, subject to the media cap. In
+   fallback mode, items are read from the page's already-loaded `blob:`/`data:` URLs. Items that
+   cannot be fetched are flagged `missing`.
 7. **Build and save.** The format writer serialises the message array. For HTML, captured media is
    referenced by its `media/…` path inside the archive. The content script creates a `Blob`, fires a
    local download via an anchor and object URL, and sends `WAX:RESULT` with the filename, byte size,
@@ -100,7 +109,52 @@ auditing what it does with their data. The authoritative technical contract is
    restored, and the export state is settled. Cancelling or failing ends the same way, with an
    error/result record instead of a file.
 
-## Scraping strategy
+## Page bridge and message store
+
+The rendered page is a poor source of truth: it virtualises messages into empty placeholders, splits
+long text across several nodes and dropped the direction classes used to tell your messages from
+others'. So the primary path reads WhatsApp's own in-memory message store instead.
+
+- `src/page/bridge.js` runs in WhatsApp Web's own page JavaScript world (a manifest content script
+  with `"world": "MAIN"`, which is why Chrome 111+ is required; `scripting` injects it into an
+  already-open tab). It reads the open chat with `require('WAWebCollections').Chat.getActive()` and
+  its `chat.msgs`, and returns every loaded message as structured data: exact time, sender, whether
+  you sent it, type, full text, caption, quoted message, reactions, each album photo as its own
+  message, deleted messages and calls. No scrolling is needed for that. It is read-only and never
+  sends, edits, deletes or marks messages.
+- `src/content/page-bridge.js` (isolated world) talks to it over `window.postMessage`. Requests are
+  `ping`, `state`, `loadEarlier`, `messages` and `media`. When the bridge starts it sets a
+  `data-wax-bridge` attribute on `<html>`, so the content script can detect it without waiting for a
+  timeout.
+- `src/content/internal.js` normalises the bridge's data into the shared message model and drives
+  loading.
+
+**Older history** is requested with WhatsApp's own loader (`WAWebChatLoadMessages`). If that function
+is not found, the message list is scrolled to the top instead. Loading continues until WhatsApp
+reports no earlier messages, the start of the chosen date range is reached, or a limit or stall is
+hit. It is still limited to what WhatsApp Web itself can load (it may offer to load older messages
+from the phone).
+
+**Media** (Download mode) goes through the same flow as clicking a photo: the bridge calls the
+message's `forceDownloadMediaEvenIfExpensive()`, which runs WhatsApp's download (and, for media the
+server no longer has, asks the phone to re-send it — `NEED_POKE`), then reads the decrypted file
+from `mediaData.mediaBlob.forceToBlob()`. Media WhatsApp already downloaded is read directly. Calling
+the lower-level `downloadAndMaybeDecrypt` was tried first and fails on current builds: it needs a
+performance-logging object only WhatsApp's own flow creates. Media WhatsApp still cannot provide
+(after a 90-second wait) is marked as not loaded, with one warning per kind.
+`scripts/wa-download-probe.js` saves the source of these functions when they change.
+
+**Fallback.** WhatsApp renames its internals between releases. If they cannot be reached, the export
+falls back to the screen-reading method described below (`src/content/extractor.js`) and says so in
+a warning. That method is slower and can miss messages and media.
+
+To find new internal names after a WhatsApp update, paste
+[`scripts/wa-internals-probe.js`](../scripts/wa-internals-probe.js) into DevTools on the WhatsApp
+tab. It is read-only; it saves `wa-internals-<time>.json` to Downloads containing only names, types,
+booleans and counts, no message content. [`scripts/wa-probe.js`](../scripts/wa-probe.js) does the
+same for the rendered page structure.
+
+## Scraping strategy (fallback)
 
 WhatsApp Web is a React app with generated class names, so the extension deliberately avoids
 depending on hashed classes. It looks for **stable structural hooks**, in a fallback chain per
@@ -142,14 +196,25 @@ Each rendered message carries a `data-id` that is unique and stable for that mes
 identity used everywhere: de-duplication, the render count, and the scroll loop's "did anything new
 appear?" check. Older WhatsApp builds used ids like `true_…`/`false_…`, which also encoded the
 message direction; current builds (seen November 2026) use one opaque token, so any non-empty
-`data-id` inside a message row counts, and direction comes from the `.message-out`/`.message-in`
-element (or, failing that, the delivery ticks only outgoing messages carry). Raw `div[data-id]`
+`data-id` inside a message row counts. Current builds also dropped the `.message-out` /
+`.message-in` classes, so direction comes from the first signal available: those classes, the
+bubble tail (`data-testid="tail-out"`, first bubble of a run only), delivery ticks, then which side
+of the list the bubble sits on. In a one-to-one chat with none of these, the author who is not the
+contact is taken to be the user, with a warning. Raw `div[data-id]`
 nodes are de-duplicated by id and nested wrappers collapse to one, because WhatsApp can nest or
 re-render them.
 
 Messages are parsed as they appear rather than at the end, so a message whose node is removed
 later still reaches the export. The final DOM pass only adds notices and anything the loop did
 not see.
+
+WhatsApp (as of November 2026) keeps messages away from the viewport as empty placeholders: the
+`data-id` node with no timestamp attribute, text or media. A placeholder is never collected;
+it stays pending and is parsed again once WhatsApp fills it in. That is why loading always ends
+with a downward sweep from the oldest loaded message, a viewport at a time, waiting up to
+`hydrateTimeoutMs` per step for on-screen placeholders to fill in. Placeholders that never fill
+in are counted in a warning. A message with no timestamp of its own borrows the one of the
+message above it on the page.
 
 ### Timestamps
 
@@ -175,18 +240,22 @@ and unit-testable without a browser.
 
 ## Media handling
 
-WhatsApp Web loads media lazily. The extension can only capture what the page has already turned
-into a blob/data URL. In **Download** mode the media phase:
+In **Download** mode on the store path, the media phase:
 
-1. walks the collected rows and looks for media elements or URLs,
-2. fetches each URL via the page context (local, no network request to WhatsApp servers),
+1. collects every photo, video, voice note, sticker and document in the exported range,
+2. asks the page bridge to download each one the way a click does (see "Media" above), which
+   fetches and decrypts it from WhatsApp's servers; the bytes come back to the content script over
+   `postMessage`,
 3. derives a file name and MIME type, adds the bytes to the ZIP under `media/`,
-4. records `zipPath` for the report, or `missing: true` when the URL is unavailable,
+4. records `zipPath` for the report, or `missing: true` when WhatsApp can no longer download it,
 5. stops downloading once `maxMediaMb` is reached, marking the remainder as missing.
 
-Some items — a photo you never scrolled past, a video thumbnail without a loaded source, a
-document whose link was not resolved — cannot be fetched. They are exported as explicit "missing"
-placeholders. The extension does not guess or reconstruct them.
+Media that is unavailable (for example expired on WhatsApp's servers) is exported as an explicit
+"missing" placeholder with one warning per kind. The extension does not guess or reconstruct it.
+
+In **fallback** mode the extension can only capture what the page has already turned into a
+blob/data URL, so items never rendered on screen are marked missing. With *Placeholders* or *None*
+no media is downloaded.
 
 The ZIP writer (`src/lib/zip.js`) is dependency-free and uses the STORE method for media (which is
 already compressed) and DEFLATE for the report text when the browser exposes `CompressionStream`.
@@ -208,9 +277,12 @@ metadata — never message content.
 
 ## Security and privacy properties
 
-- **No network requests.** The only `fetch` calls operate on `blob:`/`data:` URLs that WhatsApp
-  Web has already created in the page; no `XMLHttpRequest`, no `WebSocket`, no remote script, no
-  analytics. This is a code-review invariant, not just a policy.
+- **No network requests from the extension's code.** The only `fetch` calls operate on `blob:`/`data:`
+  URLs; no `XMLHttpRequest`, no `WebSocket`, no remote URL, no remote script, no analytics. Lint
+  enforces this. Media downloads go only through WhatsApp's own download manager via the page
+  bridge, and nothing is ever sent anywhere else.
+- **The page bridge is read-only.** It runs in WhatsApp's page world, so it only reads the message
+  store and never sends, edits, deletes or marks messages.
 - **User content never touches `innerHTML`.** Format writers escape text (`&`, `<`, `>`, quotes,
   newlines as appropriate) and the HTML writer emits markup around escaped text; DOM APIs use
   `textContent`. This blocks a message containing HTML from executing in the exported report or the
@@ -218,8 +290,8 @@ metadata — never message content.
 - **CSV is UTF-8 with a BOM** and RFC 4180 quoting, so Excel and Sheets open it correctly.
 - **Least privilege.** Only the four declared permissions; the content script only matches
   `https://web.whatsapp.com/*`.
-- **No remote code.** Everything is packaged; the extension works offline (after WhatsApp itself
-  has loaded).
+- **No remote code.** Everything is packaged. (Downloading media needs WhatsApp's own connection to
+  its servers.)
 
 ## Failure modes
 
@@ -229,7 +301,8 @@ metadata — never message content.
 | No messages matched the filters | Export ends with `NO_MESSAGES` and suggests widening the date range or loading more history. |
 | An export is already running | Second request is refused with `ALREADY_RUNNING`; the popup keeps showing the live one. |
 | Selector no longer matches | Warning recorded, fallback tried; export continues with whatever is available. |
-| Media URL unavailable | Item marked missing; count surfaced in the summary. |
+| Media unavailable | Item marked missing; one warning per kind surfaced in the summary. |
+| WhatsApp internals not found | Falls back to screen reading, with a warning that the conversation was read from the screen. |
 | Media cap reached | Remaining items marked missing; warning explains the cap. |
 | User cancels | Scroll/parse/media loops stop at the next checkpoint; state becomes `cancelled`. |
 | Popup closed mid-export | Content script continues; state mirrored to session storage; reopened popup restores it. |
@@ -252,7 +325,8 @@ where the interesting logic lives:
 `test/fixture.mjs` builds the simulated conversation and day dividers; `test/harness.mjs` provides
 the fake `chrome.*` surface, script loader and download capture. Live WhatsApp Web is still the
 final acceptance check for selector health, with the diagnostics panel as the fast signal. There is
-no browser automation dependency and no network in tests.
+no browser automation dependency and no network in tests. `test/store.test.mjs` covers the store
+path against a simulated bridge.
 
 ## Extending safely
 
@@ -264,5 +338,5 @@ When WhatsApp changes its DOM:
 3. Add or update a diagnostics selector entry so the next break is visible.
 4. Bump the version and add a [CHANGELOG](../CHANGELOG.md) entry.
 
-Never add a network call, never interpolate message text into an HTML string, and never move
+Never add a network call from the extension's own code, never interpolate message text into an HTML string, and never move
 essential state into the popup. Those three rules are the whole security and reliability model.

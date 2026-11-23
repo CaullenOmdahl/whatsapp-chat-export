@@ -5,16 +5,22 @@
  * message is mounted. Capturing therefore has to happen from the live page, before
  * the conversation is scrolled back and WhatsApp reclaims the object URLs.
  *
- * Only already-rendered media can be captured. A photo the user has never opened in
- * the chat has no blob URL at all, so it is reported as missing rather than silently
- * omitted.
+ * Only already-rendered media can be captured that way. A photo the user has never
+ * opened in the chat has no blob URL at all, so it is reported as missing rather than
+ * silently omitted.
+ *
+ * Messages read from WhatsApp's store (internal.js) carry a `wax-msg:<id>` URL
+ * instead: their media is downloaded and decrypted by WhatsApp's own download manager
+ * through the page bridge (`readInternal`), whether or not it was ever opened.
  */
 (function (global) {
   'use strict';
 
   var WAEx = (global.WAEx = global.WAEx || {});
 
+  /** Page blob: URLs are local reads; downloads through WhatsApp mostly wait on the network. */
   var CONCURRENCY = 3;
+  var INTERNAL_CONCURRENCY = 6;
 
   var EXTENSION_BY_MIME = {
     'image/jpeg': 'jpg',
@@ -53,6 +59,9 @@
     if (clean === 'application/pdf') return 'pdf';
     if (kind === 'sticker') return 'webp';
     if (kind === 'gif') return 'gif';
+    if (kind === 'image') return 'jpg';
+    if (kind === 'video') return 'mp4';
+    if (kind === 'voice' || kind === 'audio') return 'ogg';
     return 'bin';
   }
 
@@ -78,6 +87,7 @@
    *
    * options:
    *   maxBytes   hard ceiling for captured media (bytes)
+   *   readInternal  (id) => Promise<{ buffer, mimetype }> for `wax-msg:` URLs
    *   shouldCancel  () => boolean
    *   onProgress    ({ attempted, captured, bytes, skipped }) => void
    */
@@ -88,12 +98,14 @@
     var shouldCancel = typeof opts.shouldCancel === 'function' ? opts.shouldCancel : function () {
       return false;
     };
+    var readInternal = typeof opts.readInternal === 'function' ? opts.readInternal : null;
 
     var pending = [];
     var entries = [];
     var bytes = 0;
     var skipped = 0;
     var warnings = [];
+    var failures = Object.create(null); // kind -> { count, reason }
     var index = 0;
 
     /** Queue one message's media (called during parsing, still synchronous). */
@@ -106,7 +118,13 @@
         skipped++;
         return;
       }
-      if (!/^(blob|data):/.test(String(media.url))) {
+      var internal = /^wax-msg:/.test(String(media.url));
+      if (internal && !readInternal) {
+        media.missing = true;
+        skipped++;
+        return;
+      }
+      if (!internal && !/^(blob|data):/.test(String(media.url))) {
         media.missing = true;
         skipped++;
         return;
@@ -125,21 +143,26 @@
 
       var blob;
       try {
-        var response = await fetch(job.url);
-        if (!response.ok && response.status !== 0) {
-          throw new Error('HTTP ' + response.status);
+        if (/^wax-msg:/.test(job.url)) {
+          var internalResult = await readInternal(job.url.slice('wax-msg:'.length));
+          blob = new Blob([internalResult.buffer], {
+            type: internalResult.mimetype || media.mime || MIME_BY_KIND[media.kind] || '',
+          });
+        } else {
+          var response = await fetch(job.url);
+          if (!response.ok && response.status !== 0) {
+            throw new Error('HTTP ' + response.status);
+          }
+          blob = await response.blob();
         }
-        blob = await response.blob();
       } catch (err) {
         media.missing = true;
         skipped++;
-        warnings.push(
-          'Could not read one ' +
-            (media.kind || 'media') +
-            ' file (' +
-            (err && err.message ? err.message : 'unknown error') +
-            '). It was left out of the archive.'
-        );
+        // One warning per kind, not per file: a chat can have dozens of these.
+        var kind = (media.kind || 'media') + (/^wax-msg:/.test(job.url) ? ':download' : '');
+        var failure = failures[kind] || (failures[kind] = { count: 0, reason: '' });
+        failure.count++;
+        if (!failure.reason) failure.reason = err && err.message ? err.message : 'unknown error';
         return;
       }
 
@@ -169,7 +192,10 @@
         ? safeFileName(media.fileName, media.kind || 'file')
         : media.kind || 'file';
       // Avoid doubling the extension when the original name already ends with it.
-      var hasExt = new RegExp('\\.' + ext + '$', 'i').test(baseName);
+      // A document's own name decides its extension; the reported type can be generic.
+      var hasExt =
+        new RegExp('\\.' + ext + '$', 'i').test(baseName) ||
+        (media.kind === 'document' && /\.[a-z0-9]{1,5}$/i.test(baseName));
       var fileName = pad(index, 4) + '-' + baseName + (hasExt ? '' : '.' + ext);
 
       media.zipPath = 'media/' + fileName;
@@ -194,6 +220,7 @@
       var attempted = pending.length;
       var captured = 0;
       var cursor = 0;
+      var finished = 0; // `cursor` counts items started; progress reports items finished
 
       async function worker() {
         while (true) {
@@ -201,21 +228,39 @@
           var i = cursor++;
           if (i >= pending.length) return;
           await captureOne(pending[i]);
+          finished++;
           if (!pending[i].message.media.missing) captured++;
           report({
             attempted: attempted,
             captured: captured,
             bytes: bytes,
             skipped: skipped,
-            done: cursor,
+            done: finished,
           });
         }
       }
 
       var workers = [];
-      var count = Math.min(CONCURRENCY, pending.length);
+      var internalJobs = pending.some(function (job) {
+        return /^wax-msg:/.test(job.url);
+      });
+      var count = Math.min(internalJobs ? INTERNAL_CONCURRENCY : CONCURRENCY, pending.length);
       for (var w = 0; w < count; w++) workers.push(worker());
       await Promise.all(workers);
+
+      Object.keys(failures).forEach(function (key) {
+        var failure = failures[key];
+        var kind = key.replace(/:download$/, '');
+        var one = failure.count === 1;
+        var what = one ? 'one ' + kind + ' file' : failure.count + ' ' + kind + ' files';
+        var cause = /:download$/.test(key)
+          ? 'WhatsApp could not download ' + (one ? 'it' : 'them') + ' (' + failure.reason + ')'
+          : 'WhatsApp had probably already released ' + (one ? 'it' : 'them') + ' (' + failure.reason + ')';
+        warnings.push(
+          'Could not save ' + what + ': ' + cause + '. ' + (one ? 'It is' : 'They are') +
+            ' marked as not loaded in the export.'
+        );
+      });
 
       return {
         entries: entries,

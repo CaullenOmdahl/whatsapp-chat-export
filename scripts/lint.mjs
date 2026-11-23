@@ -5,8 +5,10 @@
  *   node scripts/lint.mjs
  *
  * Verifies syntax, JSON validity, the manifest ↔ namespace contract, and the project's
- * hard rules (no network, no remote code, no innerHTML with user content, no new
- * permissions). It deliberately does not duplicate behavioural tests.
+ * hard rules (no network requests from the extension's own code — media is downloaded
+ * by WhatsApp's own download manager through the page bridge — no remote code, no
+ * innerHTML with user content, no new permissions). It deliberately does not duplicate
+ * behavioural tests.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -140,8 +142,11 @@ for (const file of shipped) {
 const mediaSource = read('src/content/media.js');
 const fetchCallers = shipped.filter((file) => /\bfetch\s*\(/.test(read(file)));
 for (const file of fetchCallers) {
-  if (file !== 'src/content/media.js') {
-    problem(`${file}: calls fetch(); only src/content/media.js may, and only for blob:/data: URLs`);
+  // The page bridge may read a media object URL WhatsApp created, and nothing else.
+  const bridgeBlobOnly = file === 'src/page/bridge.js' && /\/\^blob:\/\.test\(url\)/.test(read(file)) &&
+    (read(file).match(/\bfetch\s*\(/g) || []).length === 1;
+  if (file !== 'src/content/media.js' && !bridgeBlobOnly) {
+    problem(`${file}: calls fetch(); only src/content/media.js (blob:/data:) and the page bridge (one blob: read) may`);
   }
 }
 if (fetchCallers.length && !/^(blob|data):/.test(mediaSource) && !/blob|data/.test(mediaSource)) {
@@ -155,7 +160,7 @@ const referenced = [
   manifest.action.default_popup,
   ...Object.values(manifest.icons),
   ...Object.values(manifest.action.default_icon),
-  ...manifest.content_scripts[0].js,
+  ...manifest.content_scripts.flatMap((entry) => entry.js),
 ];
 for (const relative of referenced) {
   if (!fs.existsSync(path.join(ROOT, relative))) problem(`manifest references a missing file: ${relative}`);

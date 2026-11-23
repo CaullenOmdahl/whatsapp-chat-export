@@ -44,11 +44,21 @@ check('background, popup and icons resolve', () => {
   eq(missing, []);
 });
 
-check('content script matches only WhatsApp Web', () => {
-  eq(manifest.content_scripts.length, 1);
-  eq(manifest.content_scripts[0].matches, ['https://web.whatsapp.com/*']);
-  eq(manifest.content_scripts[0].run_at, 'document_idle');
-  eq(manifest.content_scripts[0].all_frames, false);
+check('content scripts match only WhatsApp Web', () => {
+  eq(manifest.content_scripts.length, 2);
+  for (const entry of manifest.content_scripts) {
+    eq(entry.matches, ['https://web.whatsapp.com/*']);
+    eq(entry.run_at, 'document_idle');
+    eq(entry.all_frames, false);
+  }
+});
+
+check('the page bridge runs in the page world, everything else isolated', () => {
+  loadLibsInNode(['src/lib/namespace.js']);
+  eq(manifest.content_scripts[0].world, undefined, 'content scripts stay in the isolated world');
+  eq(manifest.content_scripts[1].world, 'MAIN');
+  eq(manifest.content_scripts[1].js, globalThis.WAEx.PAGE_FILES);
+  ok(Number(manifest.minimum_chrome_version) >= 111, 'world: MAIN needs Chrome 111');
 });
 
 check('content script list matches WAEx.CONTENT_FILES exactly', () => {
@@ -64,7 +74,7 @@ check('versions agree across manifest, namespace and package.json', () => {
 });
 
 check('every listed content script file exists', () => {
-  const missing = manifest.content_scripts[0].js.filter((relative) => !exists(relative));
+  const missing = manifest.content_scripts.flatMap((entry) => entry.js).filter((relative) => !exists(relative));
   eq(missing, []);
 });
 

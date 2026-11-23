@@ -47,6 +47,7 @@ const popupListeners = [];
 const localStore = contentMock.local;
 const sessionStore = contentMock.session;
 const dispatched = [];
+const injections = [];
 
 function readStore(store, keys) {
   if (keys === null || keys === undefined) return Object.assign({}, store);
@@ -105,7 +106,8 @@ function popupChrome() {
       },
     },
     scripting: {
-      executeScript(_options, cb) {
+      executeScript(options, cb) {
+        injections.push(options);
         if (cb) cb([]);
       },
     },
@@ -245,6 +247,22 @@ await checkAsync('the file reached the download layer', async () => {
   eq(contentMock.session['wax:state'].phase, 'done');
 });
 
+await checkAsync('the success panel spells out each warning, not just a count', async () => {
+  const warnings = [
+    'Could not confirm that the first message of the conversation was reached.',
+    '3 message(s) had no readable timestamp.',
+  ];
+  for (const listener of popupListeners.slice()) {
+    listener(
+      { type: 'WAX:RESULT', ok: true, filename: 'x.html', bytes: 10, messageCount: 2, warnings },
+      { id: 'content' }
+    );
+  }
+  await waitFor(() => /2 warnings/.test(bodyText()), 10000, 'warning count');
+  const items = Array.from(popupDocument.querySelectorAll('.success-warning-list li')).map((li) => li.textContent);
+  eq(items, warnings, 'every warning is listed verbatim');
+});
+
 await checkAsync('history is shown in the popup', async () => {
   ok(Array.isArray(localStore['wax:history']), 'history should be stored');
   eq(localStore['wax:history'].length, 1);
@@ -321,6 +339,35 @@ await checkAsync('custom size limit is persisted and sent with the export', asyn
   const exportMessage = dispatched.filter((m) => m.type === 'WAX:EXPORT').pop();
   eq(exportMessage.settings.maxMediaMb, 120, 'export must carry the chosen limit');
   ok(contentEnv.downloads[contentEnv.downloads.length - 1].filename.endsWith('.zip'));
+});
+
+await checkAsync('refresh confirms it ran', async () => {
+  const close = popupDocument.querySelector('[aria-label="Close diagnostics"]');
+  if (close) close.click();
+  const refresh = popupDocument.querySelector('[aria-label="Refresh chat info"]');
+  ok(refresh, 'refresh button');
+  refresh.click();
+  await waitFor(() => /· Updated/.test(popupDocument.querySelector('.chat-meta')?.textContent || ''), 5000, 'Updated note');
+});
+
+await checkAsync('refresh reconnects when the tab answers without a chat', async () => {
+  // Live: "Open a chat in WhatsApp Web to get started" while a chat was open, after the
+  // extension was reloaded. The first answer says no chat; refresh re-injects, then asks again.
+  const realDispatch = contentMock.dispatch;
+  let pings = 0;
+  contentMock.dispatch = async (message) => {
+    const reply = await realDispatch(message);
+    if (message.type === 'WAX:PING' && pings++ === 0) return { ...reply, chat: { ...reply.chat, found: false, reason: 'stale' } };
+    return reply;
+  };
+  injections.length = 0;
+  await waitFor(() => !popupDocument.querySelector('[aria-label="Refresh chat info"]')?.disabled, 5000, 'refresh ready');
+  popupDocument.querySelector('[aria-label="Refresh chat info"]').click();
+  await waitFor(() => pings >= 2, 5000, 'second ping after reconnecting');
+  contentMock.dispatch = realDispatch;
+  ok(injections.some((o) => o.world === 'MAIN'), 'the page bridge was re-injected');
+  ok(injections.some((o) => !o.world && o.files.includes('src/content/content.js')), 'the content scripts were re-injected');
+  await waitFor(() => /Design Team/.test(popupDocument.querySelector('.chat-card')?.textContent || ''), 5000, 'chat shown');
 });
 
 suite('popup: degraded states');

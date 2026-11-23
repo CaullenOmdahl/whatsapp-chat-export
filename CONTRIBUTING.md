@@ -29,9 +29,11 @@ npm run smoke:chrome
 These come from [docs/PROTOCOL.md](docs/PROTOCOL.md); a pull request that breaks one
 of them will be asked to change.
 
-1. **No network.** Chat data and message content never leave the browser. `fetch` may
-   only read `blob:` / `data:` URLs that already exist in the page (that is how media
-   is captured). No analytics, telemetry, remote config or remote code.
+1. **No network requests from the extension's own code.** `fetch` may only read `blob:` /
+   `data:` URLs; no XHR, no WebSocket, no remote URLs. Media downloads go only through
+   WhatsApp's own download manager via the page bridge. Nothing may ever be sent anywhere
+   else: no analytics, telemetry, remote config or remote code.
+   `src/page/bridge.js` must stay read-only: never send, edit, delete or mark messages.
 2. **No new permissions.** The manifest asks for `storage`, `scripting`, `activeTab`
    and host access to `https://web.whatsapp.com/*`. Widening that needs a very good
    reason and a discussion in an issue first.
@@ -46,8 +48,10 @@ of them will be asked to change.
 
 ## What is most useful
 
-- **Selector fixes.** WhatsApp Web ships obfuscated, rotating markup. When a selector
-  stops matching, the few structural hooks in `src/content/extractor.js` need updating.
+- **Selector and internals fixes.** WhatsApp Web ships obfuscated, rotating markup and renames
+  its internal modules. When a selector stops matching, the few structural hooks in
+  `src/content/extractor.js` (the fallback) need updating; when an internal name changes,
+  `src/page/bridge.js` does. `scripts/wa-internals-probe.js` helps find the new names.
   Include the output of the popup's **Diagnostics** panel and, if possible, a minimal
   HTML snippet of the new structure with message content redacted.
 - **Locale/timestamp bugs.** WhatsApp renders dates differently per language. Add a test
@@ -68,6 +72,7 @@ Every behavioural change needs a test. The suites are plain Node scripts:
 | `test/extractor.test.mjs` | Scraper against the simulated DOM in `test/fixture.mjs` |
 | `test/e2e.test.mjs` | Content script end to end, downloaded file checked on disk |
 | `test/popup.test.mjs` | Real popup wired to the real content script |
+| `test/store.test.mjs` | Message-store path (page bridge data to export) |
 
 `npm test` runs all of them. If you change the fixture DOM to match a new WhatsApp
 structure, update the expected values and say so in the pull request.
