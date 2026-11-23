@@ -49,7 +49,7 @@ function msg(n, attrs) {
   });
 }
 
-function buildStore({ downloads, failLoader = false, idleLoader = false, allStuck = false } = {}) {
+function buildStore({ downloads, failLoader = false, idleLoader = false, allStuck = false, loaderNeedsMsgs = false } = {}) {
   const older = [
     msg(1, { type: 'e2e_notification' }),
     msg(2, { type: 'chat', body: 'First message, loaded only on request.' }),
@@ -157,10 +157,11 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
     },
     WAWebMediaStore: { LruMediaStore: { get: async (key) => cache.get(key) || null } },
     WAWebChatLoadMessages: {
-      loadEarlierMsgs: async (c) => {
+      loadEarlierMsgs: async function (c) {
         if (failLoader) throw new Error('loader changed');
         if (idleLoader) return;
         if (c !== chat) throw new Error('wrong argument');
+        if (loaderNeedsMsgs && arguments[1] !== msgs) return []; // runs, loads nothing
         list.unshift(...older);
         state.__x_noEarlierMsgs = true;
       },
@@ -297,6 +298,10 @@ await checkAsync('when WhatsApp renamed its loader, history still loads by scrol
     result.warnings.some((w) => /stopped returning older messages/.test(w)),
     'the mock never loads on scroll, so the stall is reported: ' + JSON.stringify(result.warnings)
   );
+  ok(
+    result.warnings.some((w) => /^Loading details: 11 messages .* WhatsApp's loader: chat threw .*Scrolling: \d+ rounds, 0 added/.test(w)),
+    'and says what loading did: ' + JSON.stringify(result.warnings)
+  );
   const data = JSON.parse(await page.downloads[0].blob.text());
   eq(data.messages.length, 11, 'everything that was loaded is still exported from the store');
   page.dom.window.close();
@@ -359,6 +364,18 @@ await checkAsync('stuck downloads overlap instead of queueing', async () => {
   eq(result.mediaCaptured, 1, 'only the already-opened photo');
   // Measured: ~770 ms started together, ~1,500 ms started three at a time.
   ok(elapsed < 2 * 600, `6 stuck items took ${elapsed} ms; started three at a time they take ~1,500 ms`);
+  page.dom.window.close();
+});
+
+await checkAsync("finds the argument form WhatsApp's loader needs", async () => {
+  // Live: with only 51 messages in memory, the export stopped at 151 — calling the loader
+  // with just the chat may run without loading anything.
+  const page = bootStorePage({ loaderNeedsMsgs: true });
+  const result = await runExport(page, { format: 'json', mediaMode: 'skip', includeSystem: true });
+  ok(result.ok, JSON.stringify(result.error));
+  ok(!result.warnings.some((w) => /Loading details/.test(w)), 'loading reached the start: ' + JSON.stringify(result.warnings));
+  const data = JSON.parse(await page.downloads[0].blob.text());
+  eq(data.messages.length, 13, 'the earlier messages were loaded with (chat, msgs)');
   page.dom.window.close();
 });
 

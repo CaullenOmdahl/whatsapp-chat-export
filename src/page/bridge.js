@@ -567,16 +567,49 @@
     return null;
   }
 
+  /**
+   * Which argument form WhatsApp's loadEarlierMsgs accepts on this build, once found.
+   * Its parameters are not public; open-source clients have called it as (chat) and as
+   * (chat, chat.msgs). Each form is tried until one adds messages, then reused.
+   */
+  var loaderForm = null;
+  var LOADER_FORMS = ['chat', 'chat+msgs', 'msgs'];
+
+  function loaderArgs(form, chat) {
+    var msgs = get(chat, 'msgs');
+    if (form === 'chat+msgs') return [chat, msgs];
+    if (form === 'msgs') return [msgs];
+    return [chat];
+  }
+
+  async function waitWhileLoading(chat) {
+    for (var i = 0; i < 100 && loadState(chat).isLoadingEarlierMsgs; i++) await sleep(100);
+  }
+
   async function loadEarlier(chat) {
     var loader = earlierLoader();
-    if (!loader) return { ok: false, reason: 'no loader' };
-    var before = msgsOf(chat).length;
-    try {
-      await loader(chat);
-    } catch (err) {
-      return { ok: false, reason: String((err && err.message) || err).slice(0, 120) };
+    if (!loader) return { ok: false, reason: 'no loader', tried: [] };
+    var forms = loaderForm ? [loaderForm] : LOADER_FORMS;
+    var tried = [];
+    for (var i = 0; i < forms.length; i++) {
+      var before = msgsOf(chat).length;
+      var returned;
+      try {
+        returned = await loader.apply(null, loaderArgs(forms[i], chat));
+        await waitWhileLoading(chat);
+      } catch (err) {
+        tried.push(forms[i] + ' threw ' + String((err && err.message) || err).replace(/[0-9A-F]{8,}/gi, '<id>').slice(0, 60));
+        continue;
+      }
+      var added = msgsOf(chat).length - before;
+      tried.push(forms[i] + ' added ' + added + ' (returned ' + describe(returned) + ')');
+      if (added > 0 || loadState(chat).noEarlierMsgs) {
+        loaderForm = forms[i];
+        return { ok: true, added: added, form: forms[i], tried: tried };
+      }
     }
-    return { ok: true, added: msgsOf(chat).length - before };
+    loaderForm = null;
+    return { ok: false, reason: 'loaded nothing', tried: tried };
   }
 
   /* ------------------------------------------------------------ dispatch */

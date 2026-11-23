@@ -6,7 +6,8 @@
 //   2. messages: every field name and type, counts by type / media stage
 //   3. media objects: the full shape (two levels, private fields included) of a downloaded
 //      photo's mediaObject, mediaData and mediaBlob, and of WhatsApp's media cache
-//   4. sources: the code of every WhatsApp function involved in downloading and reading media
+//   4. sources: the code of every WhatsApp function involved in loading history and in
+//      downloading and reading media
 //   5. read paths: for a sample of every media type and stage, tries every place a file
 //      could be (incl. the <img> WhatsApp already rendered) and counts which return a file
 //   6. live download: starts up to 4 not-yet-downloaded items the way a click does and
@@ -118,7 +119,7 @@
     const add = (name, fn, max) => { const s = src(fn, max); if (s) S[name] = s; };
     const dm = (req('WAWebDownloadManager') || {}).downloadManager;
     add('downloadManager.downloadAndMaybeDecrypt', dm && dm.downloadAndMaybeDecrypt);
-    for (const mod of ['WAWebMediaDownloadMsg', 'WAWebMediaMmsV4Download', 'WAWebCreateMediaBlobUrl', 'WAWebMediaBlobProvider', 'WAWebDownloadAndDecryptCache', 'WAWebMediaStore', 'WAWebMediaObject', 'WAWebMediaDownloadService']) {
+    for (const mod of ['WAWebChatLoadMessages', 'WAWebMediaDownloadMsg', 'WAWebMediaMmsV4Download', 'WAWebCreateMediaBlobUrl', 'WAWebMediaBlobProvider', 'WAWebDownloadAndDecryptCache', 'WAWebMediaStore', 'WAWebMediaObject', 'WAWebMediaDownloadService']) {
       const m = req(mod);
       if (!m) continue;
       for (const k of Object.keys(m)) if (typeof m[k] === 'function') add(mod + '.' + k, m[k], 6000);

@@ -92,6 +92,8 @@
     var originalTop = null;
     var state = await b.call('state');
     var ended = '';
+    // What loading did, for the warning if it stops early: an export explains itself.
+    var log = { startLoaded: state.loaded, loaderTried: [], loaderAdded: 0, scrollRounds: 0, scrollAdded: 0 };
 
     while (true) {
       onProgress({ loaded: state.loaded, oldest: state.oldest ? state.oldest * 1000 : null });
@@ -122,8 +124,14 @@
         try {
           var result = await b.call('loadEarlier', null, LIMITS.loadTimeoutMs);
           loaded = Boolean(result && result.ok);
+          if (result && result.tried && log.loaderTried.length < 6) {
+            log.loaderTried = log.loaderTried.concat(result.tried).slice(0, 6);
+          } else if (result && result.reason && !log.loaderTried.length) {
+            log.loaderTried.push(result.reason);
+          }
           if (!loaded) useLoader = false;
         } catch (err) {
+          log.loaderTried.push('request failed: ' + String((err && err.message) || err).slice(0, 60));
           useLoader = false;
         }
       }
@@ -143,9 +151,12 @@
         }
         scroller.scrollTop = 0;
         await sleep(LIMITS.scrollWaitMs);
+        log.scrollRounds++;
       }
 
       state = await b.call('state');
+      if (loaded) log.loaderAdded += Math.max(0, state.loaded - before);
+      else log.scrollAdded += Math.max(0, state.loaded - before);
       if (state.loaded <= before && loaded) {
         // The loader ran but brought nothing: try scrolling before calling it a stall.
         useLoader = false;
@@ -164,6 +175,15 @@
       } else {
         idle = 0;
       }
+    }
+
+    if (ended !== 'start' && ended !== 'date' && ended !== 'cancelled') {
+      warnings.push(
+        'Loading details: ' + log.startLoaded + ' messages were loaded at the start, ' + state.loaded + ' at the end. ' +
+          "WhatsApp's loader: " + (log.loaderTried.length ? log.loaderTried.join('; ') : 'not available') +
+          (log.loaderAdded ? ' (' + log.loaderAdded + ' added in total)' : '') + '. ' +
+          'Scrolling: ' + log.scrollRounds + ' rounds, ' + log.scrollAdded + ' added.'
+      );
     }
 
     if (scroller && originalTop !== null) {
