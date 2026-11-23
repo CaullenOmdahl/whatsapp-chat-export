@@ -21,6 +21,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A one-to-one chat is no longer marked as a group in the export because the user's own
   messages carry a second name. Incoming messages WhatsApp shows without an author line
   (deleted messages, some stickers) are attributed to the other person in a one-to-one chat.
+- **Your own messages are recognised again.** WhatsApp no longer puts `.message-out` /
+  `.message-in` on messages, so every message was exported as incoming. Direction now comes
+  from, in order: the old classes, the bubble tail (`tail-out`), delivery ticks, and which
+  side of the list the bubble sits on. If none of those is available in a one-to-one chat,
+  the author who is not the contact is taken to be you, with a warning saying so.
 - Deleted messages read "This message was deleted" instead of exporting as a blank line.
 - WhatsApp notices that carry a `data-id` (the encryption notice, for example) are exported
   as system messages. They were counted as unread placeholders, which also caused a false

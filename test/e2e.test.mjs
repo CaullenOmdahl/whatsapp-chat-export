@@ -22,7 +22,7 @@ import {
   ok,
   summary,
 } from './harness.mjs';
-import { buildFixtureHtml, buildEmptyFixtureHtml } from './fixture.mjs';
+import { buildFixtureHtml, buildEmptyFixtureHtml, directChatRows } from './fixture.mjs';
 
 const MEDIA_URL = 'blob:https://web.whatsapp.com/9f1c2d3e-media';
 const OUT = path.join(ROOT, 'test', 'out');
@@ -282,4 +282,21 @@ await checkAsync('writes an HTML report for manual review', async () => {
 });
 
 page.dom.window.close();
+
+suite('e2e: one-to-one chat without direction markers');
+
+await checkAsync('the user is identified by name and the chat is not a group', async () => {
+  const direct = bootPage(buildFixtureHtml({ rows: directChatRows(), title: 'Richard Roe' }));
+  const result = await runExport(direct, { format: 'json', mediaMode: 'skip' });
+  ok(result.ok, JSON.stringify(result.error));
+  const data = JSON.parse(await direct.downloads[0].blob.text());
+  eq(data.chat.isGroup, false);
+  eq(
+    data.messages.map((m) => `${m.author}:${m.direction}`),
+    ['Richard Roe:incoming', 'Sam Smith:outgoing', 'Richard Roe:incoming']
+  );
+  ok(result.warnings.some((w) => /identified by name \("Sam Smith"\)/.test(w)), JSON.stringify(result.warnings));
+  direct.dom.window.close();
+});
+
 process.exit(summary() ? 0 : 1);

@@ -67,6 +67,29 @@ const documentMedia = (fileName) => `
 
 const voiceMedia = () => `<div data-testid="audio-play" class="x1rg5ohu"></div>`;
 
+/**
+ * A one-to-one chat as current WhatsApp renders it (2026-11): opaque data-ids and no
+ * direction classes at all. The user's own messages carry their own name.
+ */
+export function directChatRows() {
+  const row = (id, author, time, body) => `
+  <div role="row">
+    <div class="_amk4">
+      <div class="focusable-list-item" data-id="${id}">
+        <div class="copyable-text" data-pre-plain-text="${esc(`[${time}, 12/11/2023] ${author}: `)}">
+          <span class="selectable-text copyable-text" dir="ltr"><span>${esc(body)}</span></span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  return [
+    dateDivider('12 November 2023'),
+    row('3EB0D1', 'Richard Roe', '09:15', 'Morning! Is the unit back online?'),
+    row('3EB0D2', 'Sam Smith', '09:17', 'Yes, rebooted it an hour ago.'),
+    row('3EB0D3', 'Richard Roe', '09:18', 'Great, thanks.'),
+  ];
+}
+
 /** Rows in chronological order. Keep in sync with tests' expected values. */
 export function conversationRows() {
   return [
@@ -169,7 +192,7 @@ export function olderRows(tag = '') {
   ];
 }
 
-export function buildFixtureHtml({ rows = conversationRows(), older = [], overflow = 'auto' } = {}) {
+export function buildFixtureHtml({ rows = conversationRows(), older = [], overflow = 'auto', title = 'Design Team' } = {}) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>WhatsApp</title></head>
@@ -185,7 +208,7 @@ export function buildFixtureHtml({ rows = conversationRows(), older = [], overfl
         <header>
           <div class="_amk4"><div class="_amk6">
             <div dir="auto" role="button">
-              <span dir="auto" title="Design Team" class="_11JPr">Design Team</span>
+              <span dir="auto" title="${esc(title)}" class="_11JPr">${esc(title)}</span>
             </div>
           </div></div>
           <div class="_amk4"><span dir="auto" title="online" class="_11JPr">online</span></div>

@@ -379,11 +379,47 @@
     if (!node.querySelector) return false;
     if (node.querySelector('.message-out')) return true;
     if (node.querySelector('.message-in')) return false;
-    // No direction class at all: delivery ticks and the pending clock only appear on
-    // messages the user sent.
-    return Boolean(
-      node.querySelector('[data-icon^="msg-check"], [data-icon^="msg-dblcheck"], [data-icon="msg-time"]')
-    );
+    // Current builds (2026-11) dropped the direction classes. The bubble "tail" says it,
+    // but only on the first bubble of a run.
+    if (node.querySelector('[data-testid="tail-out"]')) return true;
+    if (node.querySelector('[data-testid="tail-in"]')) return false;
+    // Delivery ticks and the pending clock only appear on messages the user sent.
+    if (
+      node.querySelector(
+        '[data-icon^="msg-check"], [data-icon^="msg-dblcheck"], [data-icon="msg-time"], ' +
+          '[data-testid^="msg-check"], [data-testid^="msg-dblcheck"], [data-testid="msg-time"]'
+      )
+    ) {
+      return true;
+    }
+    var side = bubbleSide(node);
+    return side === 'right';
+  }
+
+  /**
+   * Which side of the message list a bubble sits on: outgoing bubbles are right-aligned.
+   * Returns 'left', 'right' or '' when layout is unavailable or ambiguous.
+   */
+  function bubbleSide(node) {
+    try {
+      var bubble =
+        node.querySelector('[data-testid="msg-container"]') ||
+        (node.matches && node.matches('[data-id]') ? node : node.querySelector('[data-id]')) ||
+        node;
+      var list = (cache.scroller && cache.scroller.contains(node) && cache.scroller) ||
+        (node.closest && node.closest('div[role="application"]')) ||
+        null;
+      if (!list || !bubble.getBoundingClientRect) return '';
+      var b = bubble.getBoundingClientRect();
+      var c = list.getBoundingClientRect();
+      if (!b.width || !c.width || b.width > c.width * 0.95) return '';
+      var leftGap = b.left - c.left;
+      var rightGap = c.right - b.right;
+      if (Math.abs(leftGap - rightGap) < 24) return '';
+      return rightGap < leftGap ? 'right' : 'left';
+    } catch (err) {
+      return '';
+    }
   }
 
   /* ------------------------------------------------------------ chat info */

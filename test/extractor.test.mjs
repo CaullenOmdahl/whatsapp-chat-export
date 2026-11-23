@@ -703,4 +703,31 @@ await checkAsync('media that cannot be read is one warning per kind, not one per
   ok(/^Could not read 3 sticker files \(HTTP 404\)/.test(result.warnings[0]), result.warnings[0]);
 });
 
+suite('extractor: direction without .message-out (live 2026-11)');
+
+check('the bubble tail marks an outgoing message', () => {
+  const rows = conversationRows()
+    .map(opaque)
+    .map((row) => row.replace(/message-(?:out|in) /, ''))
+    .map((row) => (/AAA3/.test(row) ? row.replace('<div class="_amk6">', '<div class="_amk6"><span data-testid="tail-out"></span>') : row));
+  const env = boot(buildFixtureHtml({ rows }));
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  eq(parsed.find((m) => m.id === '3EB0AAA3C0FFEE').isOutgoing, true);
+  eq(parsed.find((m) => m.id === '3EB0AAA1C0FFEE').isOutgoing, false);
+});
+
+check('a right-aligned bubble is outgoing when nothing else says so', () => {
+  const rows = conversationRows().map(opaque).map((row) => row.replace(/message-(?:out|in) /, ''));
+  const env = boot(buildFixtureHtml({ rows }));
+  const app = env.document.querySelector('div[role="application"]');
+  const rect = (left, right) => () => ({ left, right, width: right - left, top: 0, bottom: 50, height: 50 });
+  app.getBoundingClientRect = rect(0, 1000);
+  for (const node of env.document.querySelectorAll('#main div[data-id]')) {
+    const out = /AAA3|AAA5|AAA6|BBB1/.test(node.getAttribute('data-id'));
+    node.getBoundingClientRect = out ? rect(600, 990) : rect(10, 400);
+  }
+  const parsed = env.WAEx.extractor.parseMessages({}).messages;
+  eq(parsed.filter((m) => m.isOutgoing).map((m) => m.id.slice(4, 8)), ['AAA3', 'AAA5', 'AAA6', 'BBB1']);
+});
+
 process.exit(summary() ? 0 : 1);

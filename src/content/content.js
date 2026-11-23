@@ -356,6 +356,28 @@
       // ---- phase 4: build --------------------------------------------------------
       setPhase(PHASE.BUILDING, 'Building file', { percent: null });
 
+      // If the page gave no direction signal at all (WhatsApp dropped the classes it used
+      // to carry), a one-to-one chat still has exactly two authors: the contact, named
+      // like the chat, and the user.
+      if (!messages.some(function (m) { return m.isOutgoing; })) {
+        var names = Object.create(null);
+        messages.forEach(function (m) {
+          if (m.author && m.type !== T.SYSTEM) names[m.author] = true;
+        });
+        var nameList = Object.keys(names);
+        if (nameList.length === 2 && names[chatInfo.name]) {
+          var self = nameList[0] === chatInfo.name ? nameList[1] : nameList[0];
+          messages.forEach(function (m) {
+            if (m.author === self) m.isOutgoing = true;
+          });
+          warnings.push(
+            'WhatsApp did not mark which messages are yours, so they were identified by name ("' +
+              self +
+              '"). Messages without a name line may be shown on the wrong side.'
+          );
+        }
+      }
+
       // Only other people's names count: the user's own messages carry their own name,
       // so counting every author makes each one-to-one chat look like a group. Decided
       // from every exported message, not the few rows on screen when the popup opened.

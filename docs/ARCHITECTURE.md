@@ -142,8 +142,11 @@ Each rendered message carries a `data-id` that is unique and stable for that mes
 identity used everywhere: de-duplication, the render count, and the scroll loop's "did anything new
 appear?" check. Older WhatsApp builds used ids like `true_…`/`false_…`, which also encoded the
 message direction; current builds (seen November 2026) use one opaque token, so any non-empty
-`data-id` inside a message row counts, and direction comes from the `.message-out`/`.message-in`
-element (or, failing that, the delivery ticks only outgoing messages carry). Raw `div[data-id]`
+`data-id` inside a message row counts. Current builds also dropped the `.message-out` /
+`.message-in` classes, so direction comes from the first signal available: those classes, the
+bubble tail (`data-testid="tail-out"`, first bubble of a run only), delivery ticks, then which side
+of the list the bubble sits on. In a one-to-one chat with none of these, the author who is not the
+contact is taken to be the user, with a warning. Raw `div[data-id]`
 nodes are de-duplicated by id and nested wrappers collapse to one, because WhatsApp can nest or
 re-render them.
 
