@@ -1077,7 +1077,11 @@
       dom.chatCard.appendChild(
         el('div', { className: 'chat-body' }, [
           el('p', { className: 'chat-empty-title', text: 'Open a chat in WhatsApp Web to get started' }),
-          el('p', { className: 'chat-empty-hint', text: 'Click any conversation, then reopen this popup.' }),
+          el('p', {
+            className: 'chat-empty-hint',
+            // The page says why it found no chat; show it, so "I am in the chat" can be diagnosed.
+            text: chat && chat.reason ? chat.reason : 'Click any conversation, then reopen this popup.',
+          }),
         ])
       );
       dom.chatCard.appendChild(buildRefreshButton());
