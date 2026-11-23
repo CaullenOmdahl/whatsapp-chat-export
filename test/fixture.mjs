@@ -84,9 +84,9 @@ export function directChatRows() {
   </div>`;
   return [
     dateDivider('12 November 2023'),
-    row('3EB0D1', 'Richard Roe', '09:15', 'Morning! Is the unit back online?'),
+    row('3EB0D1', 'Jordan Roe', '09:15', 'Morning! Is the unit back online?'),
     row('3EB0D2', 'Sam Smith', '09:17', 'Yes, rebooted it an hour ago.'),
-    row('3EB0D3', 'Richard Roe', '09:18', 'Great, thanks.'),
+    row('3EB0D3', 'Jordan Roe', '09:18', 'Great, thanks.'),
   ];
 }
 

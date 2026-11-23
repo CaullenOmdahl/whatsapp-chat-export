@@ -138,14 +138,14 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
   const state = new Model({ noEarlierMsgs: false, isLoadingEarlierMsgs: false });
   const list = [...loaded];
   const msgs = { getModelsArray: () => list, msgLoadState: state };
-  const chat = new Model({ id: RICHARD, formattedTitle: 'Richard Roe', isGroup: false });
+  const chat = new Model({ id: RICHARD, formattedTitle: 'Jordan Roe', isGroup: false });
   chat.msgs = msgs;
 
   const modules = {
     WAWebCollections: {
       Chat: { getActive: () => chat },
       Contact: {
-        get: (wid) => (wid === RICHARD ? new Model({ name: 'Richard Roe' }) : new Model({ pushname: 'Sam' })),
+        get: (wid) => (wid === RICHARD ? new Model({ name: 'Jordan Roe' }) : new Model({ pushname: 'Sam' })),
         getMeContact: () => new Model({ id: ME }),
       },
       Reactions: {
@@ -178,7 +178,7 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
 
 function bootStorePage(options = {}) {
   const mediaRequests = [];
-  const env = createEnv(buildFixtureHtml({ title: 'Richard Roe' }));
+  const env = createEnv(buildFixtureHtml({ title: 'Jordan Roe' }));
   const store = buildStore({ downloads: mediaRequests, ...options });
   if (!options.noRequire) env.window.require = store.require;
   // Media time limit for tests. The slow re-sent photo below needs longer than this, so it
@@ -217,7 +217,7 @@ await checkAsync('exports every message from the store, loading earlier history 
 
 await checkAsync('direction, authors, text and types come from the store', async () => {
   const byId = (n) => jsonExport.messages.find((m) => m.id.endsWith('_M' + n));
-  eq(byId(2).author, 'Richard Roe');
+  eq(byId(2).author, 'Jordan Roe');
   eq(byId(2).direction, 'incoming');
   eq(byId(3).author, 'You');
   eq(byId(3).direction, 'outgoing');
