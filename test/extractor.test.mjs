@@ -730,4 +730,43 @@ check('a right-aligned bubble is outgoing when nothing else says so', () => {
   eq(parsed.filter((m) => m.isOutgoing).map((m) => m.id.slice(4, 8)), ['AAA3', 'AAA5', 'AAA6', 'BBB1']);
 });
 
+suite('extractor: long messages split across text elements (probe 2026-11)');
+
+const splitMessage = (id, paragraphs) => `
+  <div role="row">
+    <div class="_amk4">
+      <div data-id="${id}" data-testid="conv-msg-${id}">
+        <div data-testid="msg-container">
+          <div class="copyable-text" data-pre-plain-text="[9:40 AM, 11/13/2023] Bob: ">
+            <div class="_akbu">
+              ${paragraphs}
+            </div>
+            <div role="button" data-testid="caption-read-more-button">Read more</div>
+          </div>
+          <div data-testid="msg-meta"><span>9:40 AM</span></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+check('every paragraph of a split message is kept, in order, without a fake quote', () => {
+  const paragraphs = ['First point.', 'Second point.', 'Third point.']
+    .map((t) => `<div><span class="selectable-text copyable-text" dir="ltr"><span>${t}</span></span></div>`)
+    .join('');
+  const env = boot(buildFixtureHtml({ rows: [splitMessage('3EB0LONG01', paragraphs)] }));
+  const message = env.WAEx.extractor.parseMessages({}).messages.find((m) => m.id === '3EB0LONG01');
+  eq(message.text, 'First point.\nSecond point.\nThird point.');
+  eq(message.quoted, null, 'the first paragraph is not a quote');
+});
+
+check('inline pieces of one line (a link inside a sentence) stay on one line', () => {
+  const line =
+    '<div><span class="selectable-text copyable-text" dir="ltr"><span>See </span></span>' +
+    '<a href="https://example.com"><span class="selectable-text copyable-text">example.com</span></a>' +
+    '<span class="selectable-text copyable-text"><span> for details</span></span></div>';
+  const env = boot(buildFixtureHtml({ rows: [splitMessage('3EB0LINK01', line)] }));
+  const message = env.WAEx.extractor.parseMessages({}).messages.find((m) => m.id === '3EB0LINK01');
+  eq(message.text, 'See example.com for details');
+});
+
 process.exit(summary() ? 0 : 1);

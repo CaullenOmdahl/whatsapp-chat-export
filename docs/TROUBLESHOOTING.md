@@ -141,6 +141,11 @@ scrolled, so a long chat takes time. While it runs, the progress line counts mes
 loaded (`Loading older messages… 1,240 so far`). Keep the WhatsApp tab in the foreground for the
 duration; you can press **Cancel** at any point and nothing is saved.
 
+For a deeper look at what WhatsApp is rendering, paste [`scripts/wa-probe.js`](../scripts/wa-probe.js)
+into DevTools on the WhatsApp tab. It scrolls through the loaded part of the open chat and saves a
+structure-only report (`wa-probe-<time>.json`, no message text, names, numbers or ids) to your
+Downloads folder; attach it to a bug report.
+
 If it stops far short of the beginning of a long chat, open **Diagnostics** and check:
 
 1. **Message list** says `scrollable` (not `not found` / `not scrollable`). If not, the scroll

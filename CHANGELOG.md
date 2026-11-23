@@ -26,6 +26,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   from, in order: the old classes, the bubble tail (`tail-out`), delivery ticks, and which
   side of the list the bubble sits on. If none of those is available in a one-to-one chat,
   the author who is not the contact is taken to be you, with a warning saying so.
+- **Long and multi-paragraph messages are exported in full.** WhatsApp now splits such a
+  message across many text elements (17 in one live message); only the last one was kept.
+  Every element is read in order, with line breaks between paragraphs, and the first
+  paragraph is no longer mistaken for a quoted reply.
+- Stickers are also recognised by WhatsApp's current `sticker-container` marker.
 - Deleted messages read "This message was deleted" instead of exporting as a blank line.
 - WhatsApp notices that carry a `data-id` (the encryption notice, for example) are exported
   as system messages. They were counted as unread placeholders, which also caused a false
@@ -33,6 +38,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Media that could not be read is reported once per kind ("Could not read 8 sticker
   files…") instead of once per file, and the routine "N messages were recovered…" note is
   gone.
+
+### Tools
+
+- `scripts/wa-probe.js`: paste into DevTools on WhatsApp Web to save a structure-only report
+  (no message text, names, numbers or ids) of the open chat's markup, for diagnosing the
+  next WhatsApp page change.
 
 ### Docs
 

@@ -117,6 +117,71 @@
     return normalize(out.join(''));
   }
 
+  /**
+   * The message body from its text elements. Current WhatsApp splits a long or
+   * multi-paragraph message across many `.selectable-text` elements (17 in one live
+   * message), so reading only one of them dropped most of the text. With several, walk
+   * their common container in order and keep only text inside them, turning `<br>`
+   * and block boundaries into line breaks.
+   */
+  function readBody(els) {
+    if (!els.length) return '';
+    if (els.length === 1) return readText(els[0]);
+
+    var container = els[0].parentElement;
+    while (container && !els.every(function (el) { return container.contains(el); })) {
+      container = container.parentElement;
+    }
+    if (!container) return readText(els[els.length - 1]);
+
+    var out = [];
+    function isBlock(el) {
+      var tag = (el.tagName || '').toUpperCase();
+      if (tag === 'DIV' || tag === 'P' || tag === 'LI' || tag === 'BLOCKQUOTE') return true;
+      try {
+        var display = global.getComputedStyle(el).display;
+        return display === 'block' || display === 'flex' || display === 'list-item';
+      } catch (err) {
+        return false;
+      }
+    }
+    function newline() {
+      if (out.length && out[out.length - 1] !== '\n') out.push('\n');
+    }
+    function visit(node, inside) {
+      var children = node.childNodes || [];
+      for (var i = 0; i < children.length; i++) {
+        var child = children[i];
+        if (child.nodeType === 3) {
+          if (inside) out.push(child.nodeValue || '');
+          continue;
+        }
+        if (child.nodeType !== 1) continue;
+        var tag = (child.tagName || '').toUpperCase();
+        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'BUTTON') continue;
+        if (child.getAttribute('role') === 'button' && !child.querySelector('.selectable-text')) continue;
+        var testid = child.getAttribute('data-testid') || '';
+        if (/^(msg-meta|quoted-message|caption-read-more-button|reaction-bubble)/.test(testid)) continue;
+        if (tag === 'BR') {
+          if (inside) out.push('\n');
+          continue;
+        }
+        if (tag === 'IMG') {
+          if (inside && child.getAttribute('alt')) out.push(child.getAttribute('alt'));
+          continue;
+        }
+        var nowInside = inside || els.indexOf(child) !== -1;
+        if (!nowInside && !child.querySelector('.selectable-text')) continue;
+        var block = isBlock(child);
+        if (block) newline();
+        visit(child, nowInside);
+        if (block) newline();
+      }
+    }
+    visit(container, false);
+    return normalize(out.join(''));
+  }
+
   function walk(node, out) {
     var children = node.childNodes || [];
     for (var i = 0; i < children.length; i++) {
@@ -1178,6 +1243,7 @@
     // Stickers are images with a sticker marker; check before generic images.
     var sticker =
       row.querySelector('[data-testid="sticker"]') ||
+      row.querySelector('[data-testid="sticker-container"]') ||
       row.querySelector('img[alt*="sticker" i]') ||
       row.querySelector('img[class*="sticker" i]');
     if (sticker) {
@@ -1314,9 +1380,11 @@
     var quoteRoot = firstMatch(row, SELECTORS.quote);
 
     if (!quoteRoot && textEls.length >= 2) {
-      // Two selectable-text blocks inside one message means quote-then-body.
+      // Older builds: a clickable block holding the first text element is the quote.
+      // Not just any parent: current builds split one long message across many text
+      // elements, and its first paragraph is not a quote.
       var first = textEls[0];
-      var candidate = first.closest('div[role="button"]') || first.parentElement;
+      var candidate = first.closest('div[role="button"]');
       if (candidate && candidate !== row) {
         var nestedTexts = candidate.querySelectorAll('.selectable-text');
         if (nestedTexts.length <= 1) quoteRoot = candidate;
@@ -1423,13 +1491,13 @@
     var textEls = row.querySelectorAll ? Array.prototype.slice.call(row.querySelectorAll('.selectable-text')) : [];
     var quote = findQuote(row, textEls);
 
-    var bodyText = '';
-    for (var i = textEls.length - 1; i >= 0; i--) {
-      var el = textEls[i];
-      if (quote && quote.isRoot && quote.isRoot.contains(el)) continue;
-      bodyText = readText(el);
-      if (bodyText) break;
-    }
+    var bodyEls = textEls.filter(function (el) {
+      if (quote && quote.isRoot && quote.isRoot.contains(el)) return false;
+      // Keep only outermost text elements; nested ones are read through their parent.
+      var parent = el.parentElement;
+      return !(parent && parent.closest && parent.closest('.selectable-text'));
+    });
+    var bodyText = readBody(bodyEls);
 
     var media = detectMedia(row);
     var reactions = ctx.includeReactions === false ? [] : findReactions(row);
