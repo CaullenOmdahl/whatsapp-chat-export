@@ -106,6 +106,7 @@
     var skipped = 0;
     var warnings = [];
     var failures = Object.create(null); // kind -> { count, reason }
+    var expiredCount = 0;
     var index = 0;
 
     /** Queue one message's media (called during parsing, still synchronous). */
@@ -159,7 +160,15 @@
         media.missing = true;
         skipped++;
         // One warning per kind, not per file: a chat can have dozens of these.
-        var kind = (media.kind || 'media') + (/^wax-msg:/.test(job.url) ? ':download' : '');
+        var message = err && err.message ? String(err.message) : '';
+        // NEED_POKE: the file has expired on WhatsApp's servers. Live, WhatsApp Web itself
+        // failed to download these when clicked, though they were still on the phone.
+        var expired = /NEED_POKE/.test(message);
+        if (expired) {
+          media.unavailable = true;
+          expiredCount++;
+        }
+        var kind = (media.kind || 'media') + (expired ? ':expired' : /^wax-msg:/.test(job.url) ? ':download' : '');
         var failure = failures[kind] || (failures[kind] = { count: 0, reason: '' });
         failure.count++;
         if (!failure.reason) failure.reason = err && err.message ? err.message : 'unknown error';
@@ -250,9 +259,21 @@
 
       Object.keys(failures).forEach(function (key) {
         var failure = failures[key];
-        var kind = key.replace(/:download$/, '');
+        var kind = key.replace(/:(download|expired)$/, '');
         var one = failure.count === 1;
         var what = one ? 'one ' + kind + ' file' : failure.count + ' ' + kind + ' files';
+        if (/:expired$/.test(key)) {
+          warnings.push(
+            (one ? 'One ' + kind + " file wasn't" : failure.count + ' ' + kind + " files weren't") +
+              ' available to WhatsApp Web: WhatsApp no longer keeps ' + (one ? 'it' : 'them') +
+              ' on its servers, and WhatsApp Web cannot fetch ' + (one ? 'it' : 'them') + ' from your phone ' +
+              '(opening ' + (one ? 'it' : 'them') + ' in WhatsApp Web fails too). ' + (one ? 'It is' : 'They are') +
+              ' usually still on your phone: opening this chat there and scrolling back sometimes makes ' +
+              (one ? 'it' : 'them') + ' available again; otherwise save ' + (one ? 'it' : 'them') +
+              ' from the phone, for example with ' + "WhatsApp's" + ' Export chat (Include media).'
+          );
+          return;
+        }
         var cause = /:download$/.test(key)
           ? 'WhatsApp could not download ' + (one ? 'it' : 'them') + ' (' + failure.reason + ')'
           : 'WhatsApp had probably already released ' + (one ? 'it' : 'them') + ' (' + failure.reason + ')';
@@ -269,6 +290,7 @@
         bytes: bytes,
         skipped: skipped,
         warnings: warnings,
+        expired: expiredCount,
         cancelled: shouldCancel(),
       };
     }

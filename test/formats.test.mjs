@@ -309,6 +309,17 @@ check('HTML warns at the top only when the export is not known to be complete', 
   ok(/History: Complete — /.test(complete), 'complete: stated in the footer');
 });
 
+check('media WhatsApp Web could not get is labelled as such', () => {
+  const messages = sampleMessages();
+  const withMedia = messages.find((m) => m.media) || messages[0];
+  withMedia.media = { kind: 'image', fileName: '', mime: 'image/jpeg', bytes: 0, missing: true, unavailable: true, zipPath: '' };
+  withMedia.type = 'image';
+  const text = formats.serialize('txt', messages, meta()).text;
+  ok(/\[Photo \(not available to WhatsApp Web\)\]/.test(text), text);
+  const data = JSON.parse(formats.serialize('json', messages, meta()).text);
+  ok(data.messages.some((m) => m.media && m.media.unavailable === true));
+});
+
 check('no outcome recorded: nothing is claimed', () => {
   const text = formats.serialize('txt', sampleMessages(), meta()).text;
   ok(!/^History: /m.test(text));

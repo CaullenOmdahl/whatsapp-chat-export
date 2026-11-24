@@ -123,8 +123,10 @@ function buildStore({
     m.forceDownloadMediaEvenIfExpensive = async () => {
       downloads.push(n);
       if (n === 8 || allStuck) {
-        // Waiting on the phone: WhatsApp's call never settles. The bridge must not hang.
-        m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
+        // n 8: expired on WhatsApp's servers (NEED_POKE); live, a click from the web never
+        // fetches it. allStuck: downloads that hang for another reason (stage stays INIT).
+        // Either way WhatsApp's call never settles, and the bridge must not hang.
+        if (!allStuck) m.__x_mediaData.__x_mediaStage = 'NEED_POKE';
         return new Promise(() => {});
       }
       if (n === 6) {
@@ -266,13 +268,10 @@ await checkAsync('downloads media that was never opened, the way a click does', 
   eq(mediaProgress[0].loaded, 0, 'the media counter starts at 0');
   eq(mediaProgress[mediaProgress.length - 1].loaded, 7, 'and ends at the number of items');
   ok(
-    result.warnings.some((w) => /^Could not save one image file: WhatsApp could not download it \(timed out \(stage NEED_POKE/.test(w)),
-    'the stuck one is reported: ' + JSON.stringify(result.warnings)
+    result.warnings.some((w) => /^One image file wasn't available to WhatsApp Web: .*save it from the phone/.test(w)),
+    'the expired one comes with what to do about it: ' + JSON.stringify(result.warnings)
   );
-  ok(
-    result.warnings.some((w) => /mediaObject\.mediaBlob=null.*cache=null/.test(w)),
-    'and the warning says what each place returned, so no extra probe is needed: ' + JSON.stringify(result.warnings)
-  );
+  eq(result.completeness.mediaExpired, 1);
   eq(page.downloads.length, 1);
   ok(page.downloads[0].filename.endsWith('.zip'), page.downloads[0].filename);
   eq(page.downloads.length && page.downloads[0].blob.size > 6 * 512, true, 'the zip holds the media bytes');
@@ -379,6 +378,10 @@ await checkAsync('stuck downloads overlap instead of queueing', async () => {
   const elapsed = Date.now() - startedAt;
   ok(result.ok, JSON.stringify(result.error));
   eq(result.mediaCaptured, 1, 'only the already-opened photo');
+  ok(
+    result.warnings.some((w) => /timed out \(stage INIT, mediaObject\.mediaBlob=null.*cache=null/.test(w)),
+    'a hang that is not expiry says what each place returned, so no extra probe is needed: ' + JSON.stringify(result.warnings)
+  );
   // Measured: ~770 ms started together, ~1,500 ms started three at a time.
   ok(elapsed < 2 * 600, `6 stuck items took ${elapsed} ms; started three at a time they take ~1,500 ms`);
   page.dom.window.close();

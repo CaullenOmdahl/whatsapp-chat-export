@@ -233,7 +233,7 @@
           var label = mediaLabel(m);
           var mediaNote = m.media.zipPath
             ? label + ' -> ' + m.media.zipPath
-            : label + (m.media.missing ? ' (not loaded)' : '');
+            : label + (m.media.unavailable ? ' (not available to WhatsApp Web)' : m.media.missing ? ' (not loaded)' : '');
           line += '[' + mediaNote + ']' + (m.text ? ' ' : '');
         }
 
@@ -390,6 +390,7 @@
                 bytes: m.media.bytes || 0,
                 file: m.media.zipPath || '',
                 missing: Boolean(m.media.missing),
+                unavailable: Boolean(m.media.unavailable),
               }
             : null,
         };
@@ -503,7 +504,9 @@
     }
 
     var note = mediaLabel(message);
-    var why = media.missing
+    var why = media.unavailable
+      ? 'not available to WhatsApp Web (no longer on its servers), so it was not saved'
+      : media.missing
       ? 'not loaded in WhatsApp, so it was not saved'
       : 'not saved with this export';
     return (
