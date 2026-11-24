@@ -23,6 +23,12 @@
     idleRounds: 4,
     /** Wait after a scroll nudge when no loader function is available. */
     scrollWaitMs: 1500,
+    /**
+     * Loader rounds in a row that may add nothing before switching to scrolling. Older
+     * history can take a while to arrive from WhatsApp's servers; each retry waits longer.
+     */
+    loaderRetries: 4,
+    retryWaitMs: 1000,
     /** One loadEarlier request. */
     loadTimeoutMs: 60000,
     /** One media download: the bridge's own 30 s deadline plus room to read the file. */
@@ -93,7 +99,8 @@
     var state = await b.call('state');
     var ended = '';
     // What loading did, for the warning if it stops early: an export explains itself.
-    var log = { startLoaded: state.loaded, loaderTried: [], loaderAdded: 0, scrollRounds: 0, scrollAdded: 0 };
+    var log = { startLoaded: state.loaded, loaderTried: [], loaderAdded: 0, loaderEmptyRounds: 0, scrollRounds: 0, scrollAdded: 0 };
+    var loaderEmpty = 0;
 
     while (true) {
       onProgress({ loaded: state.loaded, oldest: state.oldest ? state.oldest * 1000 : null });
@@ -123,7 +130,8 @@
       if (useLoader) {
         try {
           var result = await b.call('loadEarlier', null, LIMITS.loadTimeoutMs);
-          loaded = Boolean(result && result.ok);
+          // 'loaded nothing' from a loader that exists is worth retrying, not abandoning.
+          loaded = Boolean(result && (result.ok || result.reason === 'loaded nothing'));
           if (result && result.tried && log.loaderTried.length < 6) {
             log.loaderTried = log.loaderTried.concat(result.tried).slice(0, 6);
           } else if (result && result.reason && !log.loaderTried.length) {
@@ -131,12 +139,14 @@
           }
           if (!loaded) useLoader = false;
         } catch (err) {
+          loaded = false;
           log.loaderTried.push('request failed: ' + String((err && err.message) || err).slice(0, 60));
           useLoader = false;
         }
       }
       if (!loaded) {
         // No usable loader: scrolling to the top makes WhatsApp fetch the previous page.
+        if (idle > 0) await sleep(LIMITS.scrollWaitMs * idle); // give a slow page more time
         var extractor = WAEx.extractor;
         scroller = scroller || (extractor && extractor.findScrollContainer());
         if (!scroller) {
@@ -157,9 +167,18 @@
       state = await b.call('state');
       if (loaded) log.loaderAdded += Math.max(0, state.loaded - before);
       else log.scrollAdded += Math.max(0, state.loaded - before);
-      if (state.loaded <= before && loaded) {
-        // The loader ran but brought nothing: try scrolling before calling it a stall.
-        useLoader = false;
+      if (loaded) {
+        if (state.loaded > before) {
+          loaderEmpty = 0;
+          idle = 0;
+          continue;
+        }
+        // The loader brought nothing this round. Wait longer each time; after a few empty
+        // rounds, try scrolling before calling it a stall.
+        loaderEmpty++;
+        log.loaderEmptyRounds++;
+        if (loaderEmpty >= LIMITS.loaderRetries) useLoader = false;
+        else await sleep(LIMITS.retryWaitMs * loaderEmpty);
         continue;
       }
       if (state.loaded <= before) {
@@ -181,7 +200,8 @@
       warnings.push(
         'Loading details: ' + log.startLoaded + ' messages were loaded at the start, ' + state.loaded + ' at the end. ' +
           "WhatsApp's loader: " + (log.loaderTried.length ? log.loaderTried.join('; ') : 'not available') +
-          (log.loaderAdded ? ' (' + log.loaderAdded + ' added in total)' : '') + '. ' +
+          (log.loaderAdded ? ' (' + log.loaderAdded + ' added in total)' : '') +
+          (log.loaderEmptyRounds ? ', ' + log.loaderEmptyRounds + ' empty rounds' : '') + '. ' +
           'Scrolling: ' + log.scrollRounds + ' rounds, ' + log.scrollAdded + ' added.'
       );
     }
@@ -193,7 +213,39 @@
         /* non-fatal */
       }
     }
-    return { ended: ended, loaded: state.loaded, warnings: warnings, cancelled: ended === 'cancelled' };
+    return {
+      ended: ended,
+      loaded: state.loaded,
+      warnings: warnings,
+      cancelled: ended === 'cancelled',
+      boundary: boundaryFor(ended, state),
+    };
+  }
+
+  /**
+   * Was the start of the history (or of the date range) actually reached? Only WhatsApp's
+   * own "nothing earlier" flag, or an oldest message before the range start, proves it.
+   */
+  function boundaryFor(ended, state) {
+    var known = Boolean(state && state.state && state.state.known);
+    switch (ended) {
+      case 'start':
+        return { status: 'complete', reason: 'Reached the first message of the chat (WhatsApp reports nothing earlier).' };
+      case 'date':
+        return { status: 'complete', reason: 'Reached the start of the selected date range.' };
+      case 'budget':
+        return { status: 'partial', reason: 'Loading stopped at the ' + Math.round(LIMITS.timeBudgetMs / 60000) + '-minute time limit.' };
+      case 'stalled':
+        return known
+          ? { status: 'partial', reason: 'WhatsApp stopped returning older messages before the start of the chat.' }
+          : { status: 'unknown', reason: 'WhatsApp stopped returning older messages and does not say whether more exist.' };
+      case 'no-loader':
+        return { status: 'partial', reason: 'Older messages could not be requested from WhatsApp.' };
+      case 'cancelled':
+        return { status: 'unknown', reason: 'The export was cancelled while loading.' };
+      default:
+        return { status: 'unknown', reason: 'Could not tell whether the whole chat was loaded.' };
+    }
   }
 
   function systemText(raw) {

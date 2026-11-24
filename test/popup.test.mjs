@@ -237,8 +237,9 @@ await checkAsync('clicking Export chat produces a downloadable file', async () =
     10000,
     'export request to the content script'
   );
-  await waitFor(() => /Export complete/i.test(bodyText()), 30000, 'success panel');
+  await waitFor(() => /Export saved/i.test(bodyText()), 30000, 'success panel');
   ok(/Design Team/.test(bodyText()));
+  ok(/Whole chat: Reached the first message of the chat/.test(bodyText()), 'the outcome is stated: ' + bodyText().slice(0, 300));
 });
 
 await checkAsync('the file reached the download layer', async () => {
@@ -254,13 +255,24 @@ await checkAsync('the success panel spells out each warning, not just a count', 
   ];
   for (const listener of popupListeners.slice()) {
     listener(
-      { type: 'WAX:RESULT', ok: true, filename: 'x.html', bytes: 10, messageCount: 2, warnings },
+      {
+        type: 'WAX:RESULT',
+        ok: true,
+        filename: 'x.html',
+        bytes: 10,
+        messageCount: 2,
+        warnings,
+        completeness: { status: 'partial', reason: 'WhatsApp stopped returning older messages.', mediaItems: 4, mediaMissing: 1 },
+      },
       { id: 'content' }
     );
   }
   await waitFor(() => /2 warnings/.test(bodyText()), 10000, 'warning count');
   const items = Array.from(popupDocument.querySelectorAll('.success-warning-list li')).map((li) => li.textContent);
   eq(items, warnings, 'every warning is listed verbatim');
+  ok(/Partial: WhatsApp stopped returning older messages\./.test(bodyText()), 'a partial export says so');
+  ok(/1 of 4 media items could not be saved/.test(bodyText()), 'missing media is counted');
+  ok(!/Whole chat/.test(bodyText()), 'and does not claim the whole chat');
 });
 
 await checkAsync('history is shown in the popup', async () => {

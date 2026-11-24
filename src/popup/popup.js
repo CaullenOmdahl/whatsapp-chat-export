@@ -1360,13 +1360,32 @@
       el('div', { className: 'success-head' }, [
         el('span', { className: 'status-icon status-icon-success', 'aria-hidden': 'true' }, icon('check')),
         el('div', { className: 'success-titles' }, [
-          el('h2', { className: 'panel-title', text: 'Export complete' }),
+          // "Saved", not "complete": whether the whole chat is in the file is shown below.
+          el('h2', { className: 'panel-title', text: 'Export saved' }),
           el('p', { className: 'success-file', title: filename, text: filename }),
         ]),
       ]),
     ];
     if (metaParts.length) {
       children.push(el('p', { className: 'success-meta', text: metaParts.join(' · ') }));
+    }
+    var outcome = exportState.completeness;
+    if (outcome && outcome.status) {
+      var outcomeLabel = { complete: 'Whole chat', partial: 'Partial', unknown: 'Completeness unknown' }[outcome.status] || 'Completeness unknown';
+      children.push(
+        el('p', { className: 'success-outcome outcome-' + outcome.status, role: 'status' }, [
+          el('b', { text: outcomeLabel + ': ' }),
+          el('span', { text: String(outcome.reason || '') }),
+        ])
+      );
+      if (outcome.mediaMissing) {
+        children.push(
+          el('p', {
+            className: 'success-outcome outcome-partial',
+            text: fmtNum(outcome.mediaMissing) + ' of ' + fmtNum(outcome.mediaItems) + ' media items could not be saved.',
+          })
+        );
+      }
     }
     if (warnings.length) {
       children.push(
@@ -1655,6 +1674,7 @@
         bytes: Number(message.bytes) || 0,
         messageCount: Number(message.messageCount) || 0,
         warnings: Array.isArray(message.warnings) ? message.warnings : [],
+        completeness: message.completeness && typeof message.completeness === 'object' ? message.completeness : null,
       };
       state.view = 'done';
       state.optionsCollapsed = true;

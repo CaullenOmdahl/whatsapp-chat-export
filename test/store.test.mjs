@@ -49,7 +49,16 @@ function msg(n, attrs) {
   });
 }
 
-function buildStore({ downloads, failLoader = false, idleLoader = false, allStuck = false, loaderNeedsMsgs = false } = {}) {
+function buildStore({
+  downloads,
+  failLoader = false,
+  idleLoader = false,
+  allStuck = false,
+  loaderNeedsMsgs = false,
+  preloaded = false,
+  emptyLoaderCalls = 0,
+  loaderDelayMs = 0,
+} = {}) {
   const older = [
     msg(1, { type: 'e2e_notification' }),
     msg(2, { type: 'chat', body: 'First message, loaded only on request.' }),
@@ -135,8 +144,10 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
     };
   }
 
-  const state = new Model({ noEarlierMsgs: false, isLoadingEarlierMsgs: false });
-  const list = [...loaded];
+  // preloaded: the whole chat is already in memory (scrolled through beforehand).
+  const state = new Model({ noEarlierMsgs: preloaded, isLoadingEarlierMsgs: false });
+  const list = preloaded ? [...older, ...loaded] : [...loaded];
+  let loaderCalls = 0;
   const msgs = { getModelsArray: () => list, msgLoadState: state };
   const chat = new Model({ id: RICHARD, formattedTitle: 'Jordan Roe', isGroup: false });
   chat.msgs = msgs;
@@ -162,6 +173,9 @@ function buildStore({ downloads, failLoader = false, idleLoader = false, allStuc
         if (idleLoader) return;
         if (c !== chat) throw new Error('wrong argument');
         if (loaderNeedsMsgs && arguments[1] !== msgs) return []; // runs, loads nothing
+        // A fresh tab: older history is still on its way from WhatsApp's servers.
+        if (loaderCalls++ < emptyLoaderCalls) return [];
+        if (loaderDelayMs) await new Promise((r) => setTimeout(r, loaderDelayMs));
         list.unshift(...older);
         state.__x_noEarlierMsgs = true;
       },
@@ -188,6 +202,7 @@ function bootStorePage(options = {}) {
   loadScripts(env.window, [...CONTENT_FILES, 'src/page/bridge.js', 'src/content/content.js']);
   fastHistoryLimits(env.window);
   env.window.WAEx.internal.LIMITS.scrollWaitMs = 20;
+  env.window.WAEx.internal.LIMITS.retryWaitMs = 20;
   const scroller = env.window.document.getElementById('msg-scroller');
   scroller.__scrollHeight = 1200;
   scroller.__clientHeight = 600;
@@ -398,6 +413,81 @@ await checkAsync('the export file carries its date range and warnings', async ()
   eq(data.settings.dateRangeLabel, 'Last 90 days');
   ok(data.warnings.some((w) => /^Loading details: /.test(w)), JSON.stringify(data.warnings));
   jsonPage.dom.window.close();
+});
+
+suite('store: history completeness (issue #8)');
+
+/** The 13 messages of the mock chat, oldest first: the known reference. */
+const REFERENCE = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13'];
+const exportedIds = (data) => data.messages.map((m) => m.id.replace(/.*_M/, ''));
+
+async function exportJson(options, settings = {}) {
+  const page = bootStorePage(options);
+  const result = await runExport(page, { format: 'json', mediaMode: 'skip', includeSystem: true, ...settings });
+  const data = result.ok ? JSON.parse(await page.downloads[0].blob.text()) : null;
+  page.dom.window.close();
+  return { result, data };
+}
+
+await checkAsync('preloaded history: complete, matches the reference', async () => {
+  const { result, data } = await exportJson({ preloaded: true });
+  ok(result.ok, JSON.stringify(result.error));
+  eq(result.completeness.status, 'complete', result.completeness.reason);
+  eq(exportedIds(data), REFERENCE);
+  eq(result.completeness.loadedMessages, 13);
+  eq(result.completeness.exportedMessages, 13);
+  eq(result.completeness.method, 'message-store');
+});
+
+await checkAsync('fresh tab, older history slow to arrive: patience reaches the start', async () => {
+  // Live: a fresh-tab export stopped at 201 of 941. Empty loader rounds are now retried with
+  // growing waits before switching to scrolling.
+  const { result, data } = await exportJson({ emptyLoaderCalls: 4, loaderDelayMs: 30 });
+  ok(result.ok, JSON.stringify(result.error));
+  eq(result.completeness.status, 'complete', result.completeness.reason);
+  eq(exportedIds(data), REFERENCE, 'the same messages as the preloaded export');
+  ok(!result.warnings.some((w) => /Loading details/.test(w)), JSON.stringify(result.warnings));
+});
+
+await checkAsync('WhatsApp-side limit: partial, never complete', async () => {
+  const { result, data } = await exportJson({ idleLoader: true });
+  ok(result.ok, JSON.stringify(result.error));
+  eq(result.completeness.status, 'partial');
+  ok(/stopped returning older messages/.test(result.completeness.reason), result.completeness.reason);
+  eq(result.completeness.exportedMessages, 11, 'what was loaded is still exported');
+  eq(data.completeness.status, 'partial', 'and the file says so');
+});
+
+await checkAsync('safety budget: partial, with the limit named', async () => {
+  const page = bootStorePage({ idleLoader: true });
+  page.WAEx.internal.LIMITS.timeBudgetMs = 1;
+  const result = await runExport(page, { format: 'json', mediaMode: 'skip' });
+  ok(result.ok, JSON.stringify(result.error));
+  eq(result.completeness.status, 'partial');
+  ok(/time limit/.test(result.completeness.reason), result.completeness.reason);
+  page.dom.window.close();
+});
+
+await checkAsync('internals unavailable: the screen fallback reports its own outcome', async () => {
+  const { result } = await exportJson({ noRequire: true });
+  ok(result.ok, JSON.stringify(result.error));
+  eq(result.completeness.method, 'screen');
+  eq(result.completeness.status, 'complete', 'the fixture page opens with its encryption notice: ' + result.completeness.reason);
+});
+
+await checkAsync('cancelled while loading: an error, not a success', async () => {
+  const page = bootStorePage({ emptyLoaderCalls: 1000 });
+  page.WAEx.internal.LIMITS.retryWaitMs = 200;
+  const before = page.mock.sent.filter((m) => m.type === 'WAX:RESULT').length;
+  await page.mock.dispatch({ type: 'WAX:EXPORT', settings: { format: 'json', mediaMode: 'skip' } });
+  await new Promise((r) => setTimeout(r, 150));
+  await page.mock.dispatch({ type: 'WAX:CANCEL' });
+  const result = await waitFor(() => page.mock.sent.filter((m) => m.type === 'WAX:RESULT')[before], 30000, 'result');
+  eq(result.ok, false);
+  eq(result.error.code, 'CANCELLED');
+  eq(result.completeness, undefined, 'no outcome claimed');
+  eq(page.downloads.length, 0, 'nothing saved');
+  page.dom.window.close();
 });
 
 process.exit(summary() ? 0 : 1);

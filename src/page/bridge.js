@@ -608,7 +608,11 @@
         return { ok: true, added: added, form: forms[i], tried: tried };
       }
     }
-    loaderForm = null;
+    if (loaderForm) {
+      // A form that worked before brought nothing this time: older history may still be
+      // on its way from WhatsApp's servers. Not a broken loader; the caller retries.
+      return { ok: true, added: 0, form: loaderForm, tried: tried };
+    }
     return { ok: false, reason: 'loaded nothing', tried: tried };
   }
 
