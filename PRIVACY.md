@@ -60,9 +60,11 @@ If a future version changes how data is handled, this document will be updated a
 
 ## Contact
 
-Questions about this policy: **your-email-here**
+Questions about this policy: open an issue at <https://github.com/CaullenOmdahl/whatsapp-chat-export/issues>.
+For anything you would rather not post publicly, use GitHub's private reporting:
+<https://github.com/CaullenOmdahl/whatsapp-chat-export/security/advisories/new>.
 
-> *Maintainers: replace `your-email-here` with a real contact address before publishing to the Chrome Web Store. The policy above is accurate for version 1.1.0 as shipped.*
+The policy above is accurate for version 1.1.0 as shipped.
 
 ## Related documents
 
