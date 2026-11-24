@@ -805,6 +805,14 @@
         className: 'blurb option-blurb media-limit-hint',
         text: 'Stop saving media after this much. Larger items are marked as missing.',
       }),
+      el('p', {
+        className: 'blurb option-blurb media-phone-tip',
+        // Live finding: older media WhatsApp's servers no longer hold often cannot be fetched by
+        // WhatsApp Web at all (its own download fails), even though the phone still has it.
+        text:
+          'Older photos may not be available to WhatsApp Web. Opening the chat on your phone and ' +
+          'scrolling back first can help; any it still cannot get are listed after the export.',
+      }),
     ]);
     card.appendChild(state.controls.mediaLimitWrap);
     card.appendChild(el('div', { className: 'option-divider' }));
@@ -1383,6 +1391,17 @@
           el('p', {
             className: 'success-outcome outcome-partial',
             text: fmtNum(outcome.mediaMissing) + ' of ' + fmtNum(outcome.mediaItems) + ' media items could not be saved.',
+          })
+        );
+      }
+      if (outcome.mediaExpired) {
+        children.push(
+          el('p', {
+            className: 'success-outcome',
+            text:
+              fmtNum(outcome.mediaExpired) + ' older ' + (outcome.mediaExpired === 1 ? 'item is' : 'items are') +
+              ' not available to WhatsApp Web. They are usually still on your phone: save them there, for example with ' +
+              "WhatsApp's Export chat (Include media).",
           })
         );
       }

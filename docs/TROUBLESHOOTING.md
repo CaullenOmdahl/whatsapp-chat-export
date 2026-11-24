@@ -209,9 +209,14 @@ Expected behaviour, and documented deliberately:
 - Media is only saved when the Media option is **Download**. With *Placeholders* or *None* nothing
   is downloaded.
 - With *Download*, WhatsApp's own download manager fetches each photo, video, voice note, sticker
-  and document in the exported range from WhatsApp's servers, including ones you never opened. An
-  item can still be missing if WhatsApp can no longer download it (for example, it expired on
-  WhatsApp's servers). The summary has one warning per kind. That is not a bug.
+  and document in the exported range from WhatsApp's servers, including ones you never opened.
+- **Older media marked "not available to WhatsApp Web".** WhatsApp deletes media from its servers
+  after a while (WhatsApp's internal state for these is `NEED_POKE`). WhatsApp Web then often
+  cannot get the file from your phone at all: opening it in WhatsApp Web fails the same way, with
+  the extension out of the picture, even though the phone still has it. This is a WhatsApp Web
+  limit, not an export bug. Opening the chat on your phone and scrolling back first sometimes
+  helps; otherwise save those items from the phone (WhatsApp's **Export chat → Include media**).
+  The export lists them in one warning, with the advice, and labels each one in the file.
 - If the export fell back to reading the screen (see above), only media that was rendered on screen
   can be captured, so more items will be missing.
 - **Size limit** (default 250 MB, adjustable from 10 to 2048 MB while Media is set to *Download*)

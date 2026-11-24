@@ -262,7 +262,7 @@ await checkAsync('the success panel spells out each warning, not just a count', 
         bytes: 10,
         messageCount: 2,
         warnings,
-        completeness: { status: 'partial', reason: 'WhatsApp stopped returning older messages.', mediaItems: 4, mediaMissing: 1 },
+        completeness: { status: 'partial', reason: 'WhatsApp stopped returning older messages.', mediaItems: 4, mediaMissing: 1, mediaExpired: 1 },
       },
       { id: 'content' }
     );
@@ -272,6 +272,7 @@ await checkAsync('the success panel spells out each warning, not just a count', 
   eq(items, warnings, 'every warning is listed verbatim');
   ok(/Partial: WhatsApp stopped returning older messages\./.test(bodyText()), 'a partial export says so');
   ok(/1 of 4 media items could not be saved/.test(bodyText()), 'missing media is counted');
+  ok(/not available to WhatsApp Web\. They are usually still on your phone/.test(bodyText()), 'expired media comes with what to do');
   ok(!/Whole chat/.test(bodyText()), 'and does not claim the whole chat');
 });
 
@@ -323,6 +324,10 @@ await checkAsync('size limit appears only for media downloads', async () => {
   eq(input.value, '250');
   eq(input.getAttribute('min'), '10');
   eq(input.getAttribute('max'), '2048');
+  ok(
+    /Older photos may not be available to WhatsApp Web/.test(popupDocument.getElementById('media-limit-wrap').textContent),
+    'downloading media comes with the phone tip'
+  );
 });
 
 await checkAsync('custom size limit is persisted and sent with the export', async () => {

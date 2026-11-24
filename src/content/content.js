@@ -513,6 +513,7 @@
         exportedMessages: messages.length,
         mediaItems: mediaItems.length,
         mediaSaved: capturedMediaCount(mediaResult),
+        mediaExpired: mediaResult && mediaResult.expired ? mediaResult.expired : 0,
         mediaMissing:
           settings.mediaMode === 'download'
             ? mediaItems.filter(function (m) {

@@ -375,10 +375,17 @@ Your browser's normal Downloads folder. Nothing is uploaded anywhere.
 
 First check that Media is set to *Download*; with *Placeholders* or *None* no media is saved. With
 *Download*, WhatsApp's own download manager fetches every photo in the range, including ones you
-never opened. A photo is exported as a placeholder marked *not loaded in WhatsApp* when WhatsApp
-can no longer download it (for example, it expired on WhatsApp's servers), or when the export fell
-back to reading the screen, which can only capture media that was rendered on screen. The warnings
-in the result panel say which case applies.
+never opened.
+
+Older photos are the common exception. WhatsApp deletes media from its servers after a while, and
+WhatsApp Web often cannot fetch those files from your phone afterwards: opening one in WhatsApp Web
+fails too, even though the phone still has it. The export marks these *not available to WhatsApp
+Web*. Opening the chat on your phone and scrolling back first sometimes makes them available again;
+otherwise save them from the phone, for example with WhatsApp's **Export chat → Include media**.
+
+A photo can also be missing when the export fell back to reading the screen, which only captures
+media that was rendered on screen. The warnings in the result panel, and at the top of the TXT,
+JSON and HTML file, say which case applies.
 </details>
 
 <details>

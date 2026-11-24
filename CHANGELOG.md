@@ -45,6 +45,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   unknown* with the reason, next to separate counts of messages loaded, messages exported and
   media saved or not saved. Shown in the popup (whose title is now "Export saved") and in the
   TXT, JSON and HTML files; HTML shows a notice at the top when the export is not complete.
+- Media that WhatsApp no longer keeps on its servers is reported as *not available to WhatsApp
+  Web*, with what to do, instead of a timeout with internal stage names ([#10]). Live, WhatsApp
+  Web's own download failed for these too, though the phone still had them. The Media option
+  shows a short note about it when *Download* is selected.
 - **History loading is patient** ([#8]): a loader round that brings nothing (older history still
   on its way from WhatsApp's servers) is retried with growing waits before falling back to
   scrolling, and a working loader is no longer abandoned after one empty round. A fresh-tab
@@ -129,6 +133,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 [#5]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/5
 [#8]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/8
+[#10]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/10
 [#6]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/6
 
 ## [1.0.2] — 2026-11-18
