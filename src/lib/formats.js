@@ -154,6 +154,35 @@
     return 'All time';
   }
 
+  var COMPLETENESS_LABEL = {
+    complete: 'Complete',
+    partial: 'PARTIAL',
+    unknown: 'Completeness unknown',
+  };
+
+  /**
+   * The export's outcome as plain lines: was the history boundary reached, and the counts
+   * that make up a backup (loaded, exported, media). Empty when no outcome was recorded.
+   */
+  function completenessLines(meta) {
+    var c = meta && meta.completeness;
+    if (!c) return [];
+    var lines = ['History: ' + (COMPLETENESS_LABEL[c.status] || COMPLETENESS_LABEL.unknown) + ' — ' + c.reason];
+    lines.push(
+      'Messages: ' + c.exportedMessages + ' exported' +
+        (c.loadedMessages && c.loadedMessages !== c.exportedMessages ? ' (' + c.loadedMessages + ' loaded from WhatsApp)' : '')
+    );
+    if (c.mediaItems) {
+      var settings = meta.settings || {};
+      lines.push(
+        settings.mediaMode === 'download'
+          ? 'Media: ' + c.mediaSaved + ' of ' + c.mediaItems + ' saved' + (c.mediaMissing ? ', ' + c.mediaMissing + ' not saved' : '')
+          : 'Media: ' + c.mediaItems + ' items, not downloaded (' + (settings.mediaMode === 'skip' ? 'media set to None' : 'placeholders only') + ')'
+      );
+    }
+    return lines;
+  }
+
   function toText(messages, meta) {
     var dt = WAEx.datetime;
     var stats = meta.stats || summarize(messages);
@@ -170,6 +199,8 @@
       lines.push('Conversation dates: ' + dt.formatRange(stats.range));
     }
     lines.push('Date range: ' + rangeLabel(meta.settings));
+    var outcome = completenessLines(meta);
+    for (var o = 0; o < outcome.length; o++) lines.push(outcome[o]);
     var notes = Array.isArray(meta.warnings) ? meta.warnings : [];
     if (notes.length) {
       lines.push('Warnings:');
@@ -321,6 +352,7 @@
         dateRangeLabel: rangeLabel(meta.settings),
       },
       warnings: Array.isArray(meta.warnings) ? meta.warnings.map(String) : [],
+      completeness: meta.completeness || null,
       stats: {
         total: stats.total,
         incoming: stats.incoming,
@@ -412,6 +444,8 @@
     '.file small{display:block;color:var(--muted);font-weight:400;font-size:11.5px}',
     '.missing{font-style:italic;color:var(--muted);font-size:12.5px}',
     '.system{display:flex;justify-content:center;margin:10px 0}',
+    '.outcome{margin:12px 16px;padding:10px 12px;border-radius:8px;border:1px solid #e0b252;background:#fff7e6;color:#5c4400;font-size:13px}',
+    '@media (prefers-color-scheme:dark){.outcome{background:#2b2412;border-color:#4b3c1a;color:#f2c66d}}',
     '.system span{background:var(--panel);color:var(--muted);font-size:12px;padding:4px 10px;',
     'border-radius:7px;max-width:80%;text-align:center;box-shadow:0 1px 1px rgba(0,0,0,.06)}',
     'footer.foot{margin-top:36px;text-align:center;color:var(--muted);font-size:12px;',
@@ -507,6 +541,10 @@
     html.push('<h1>' + escapeHtml(chatName) + '</h1>');
     html.push('<p>' + escapeHtml(summaryParts.join(' · ')) + '</p>');
     html.push('</header>');
+    // A partial or unverified export says so where it is seen first, not only in the footer.
+    if (meta.completeness && meta.completeness.status !== 'complete') {
+      html.push('<div class="outcome">' + escapeHtml(completenessLines(meta)[0]) + '</div>');
+    }
 
     for (var g = 0; g < groups.length; g++) {
       html.push('<div class="day"><span>' + escapeHtml(groups[g].label) + '</span></div>');
@@ -567,6 +605,8 @@
         ' messages.'
     );
     html.push('<br>Date range: ' + escapeHtml(rangeLabel(settings)) + '.');
+    var htmlOutcome = completenessLines(meta);
+    for (var h = 0; h < htmlOutcome.length; h++) html.push('<br>' + escapeHtml(htmlOutcome[h]));
     var htmlNotes = Array.isArray(meta.warnings) ? meta.warnings : [];
     if (htmlNotes.length) {
       html.push('<br>Warnings:<ul class="notes">');

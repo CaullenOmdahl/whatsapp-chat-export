@@ -895,12 +895,15 @@
     }
 
     /** Shared stop conditions. Returns true when the loop must end. */
+    var limitHit = '';
+
     function finished() {
       if (shouldCancel()) {
         cancelled = true;
         return true;
       }
       if (rounds >= LIMITS.maxScrollSteps) {
+        limitHit = limitHit || LIMITS.maxScrollSteps + '-scroll-step limit';
         warnings.push(
           'Stopped after ' +
             LIMITS.maxScrollSteps +
@@ -909,6 +912,7 @@
         return true;
       }
       if (Date.now() - startedAt > LIMITS.timeBudgetMs) {
+        limitHit = limitHit || Math.round(LIMITS.timeBudgetMs / 60000) + '-minute time limit';
         warnings.push(
           'Stopped after ' +
             Math.round((Date.now() - startedAt) / 1000) +
@@ -917,6 +921,7 @@
         return true;
       }
       if (countKeys(collected) >= LIMITS.maxMessages) {
+        limitHit = limitHit || WAEx.plural(LIMITS.maxMessages, 'message') + ' limit';
         warnings.push(
           'Stopped at ' +
             WAEx.plural(LIMITS.maxMessages, 'message') +
@@ -949,6 +954,10 @@
       );
     }
 
+    var olderEnd = ''; // why the upward pass ended: 'top', 'date', 'stalled' or ''
+    var startConfirmed = false; // the top of the list is WhatsApp's opening notice
+    var newestMissing = false;
+
     /* ---------------------------------------------------- pass 1: older */
 
     if (scroller && !finished()) {
@@ -956,7 +965,7 @@
       var idleRounds = 0;
       var mode = 'jump';
       var retriedAtTop = false;
-      var olderEnd = '';
+      olderEnd = '';
 
       while (!finished()) {
         var atTopBefore = (scroller.scrollTop || 0) <= 2;
@@ -1024,12 +1033,13 @@
         }
       }
 
+      if (olderEnd === 'top') startConfirmed = startOfChatVisible(main);
       if (!cancelled && olderEnd === 'stalled') {
         warnings.push(
           'Loading older messages stopped before the top of the conversation was reached. ' +
             'The oldest messages may be missing; scroll up in the chat and export again.'
         );
-      } else if (!cancelled && olderEnd === 'top' && !startOfChatVisible(main)) {
+      } else if (!cancelled && olderEnd === 'top' && !startConfirmed) {
         warnings.push(
           'Could not confirm that the first message of the conversation was reached. ' +
             'If older messages are missing, scroll to the top of the chat in WhatsApp ' +
@@ -1093,6 +1103,26 @@
       }
     }
 
+    /**
+     * Was the start of the history (or of the date range) actually reached? Evidence only:
+     * a loaded list or a written file is not proof of a complete export.
+     */
+    function historyBoundary() {
+      if (cancelled) return { status: 'unknown', reason: 'The export was cancelled while loading.' };
+      if (!scroller) {
+        return { status: 'partial', reason: 'Only the messages on screen could be read (no scrollable message list was found).' };
+      }
+      if (limitHit) return { status: 'partial', reason: 'Loading stopped at the ' + limitHit + '.' };
+      if (newestMissing) return { status: 'partial', reason: 'The newest messages may not have been reached.' };
+      if (olderEnd === 'date') return { status: 'complete', reason: 'Reached the start of the selected date range.' };
+      if (olderEnd === 'top' && startConfirmed) return { status: 'complete', reason: 'Reached the first message of the chat.' };
+      if (olderEnd === 'top') {
+        return { status: 'unknown', reason: 'Reached the top of the list, but could not confirm it is the first message of the chat.' };
+      }
+      if (olderEnd === 'stalled') return { status: 'partial', reason: 'Loading older messages stopped before the top of the chat.' };
+      return { status: 'unknown', reason: 'Could not tell whether the whole chat was loaded.' };
+    }
+
     await sleep(LIMITS.settleAfterLoadMs);
 
     // Final pass over the DOM: picks up system notices and anything rendered since the
@@ -1140,6 +1170,7 @@
       if (all.newest !== null && domResult.messages.length) {
         var lastKnown = domResult.messages[domResult.messages.length - 1];
         if (lastKnown.timestamp !== null && lastKnown.timestamp < all.newest) {
+          newestMissing = true;
           warnings.push(
             'The newest message may not have been reached. Please report this with the Diagnostics output.'
           );
@@ -1158,6 +1189,7 @@
       rounds: rounds,
       passes: { older: Boolean(scroller), newer: Boolean(scroller) && !startedAtNewest },
       startedAtNewest: startedAtNewest,
+      boundary: historyBoundary(),
       scroll: scrollInfo(scroller),
       warnings: warnings,
       cancelled: cancelled,

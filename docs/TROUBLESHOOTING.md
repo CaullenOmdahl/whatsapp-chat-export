@@ -109,6 +109,23 @@ This is the `NO_MESSAGES` error, meaning the filters removed everything:
 - **System-only content** — a chat containing only system notices with *Include system messages*
   off will produce no messages by design.
 
+### "Partial" or "Completeness unknown"
+
+Every export states whether the whole chat is in the file, in the popup and at the top of the TXT,
+JSON and HTML files (`History: …`):
+
+- **Complete**: the start of the chat was reached (WhatsApp reports nothing earlier), or the start
+  of your date range was.
+- **PARTIAL**: loading stopped before that, and the reason is given — for example WhatsApp stopped
+  returning older messages, or a safety limit was hit. Everything that was loaded is still in the
+  file.
+- **Completeness unknown**: the extension could not tell, for example the screen-reading fallback
+  reached the top of the list but could not confirm it was the first message.
+
+The counts next to it are separate facts: messages loaded from WhatsApp, messages exported (after
+the date range and the system-message option), and media saved versus not saved. A partial export
+also carries a `Loading details` warning saying what loading tried.
+
 ### The export stopped early
 
 The result panel and its warnings list say why.

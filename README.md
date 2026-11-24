@@ -218,8 +218,11 @@ The popup shows live progress while it loads the conversation's history
 in the WhatsApp tab, and reopening shows the progress again — but keep the WhatsApp tab itself
 open and in the foreground.
 
-When it finishes you get a summary: filename, message count, file size and any warnings. The file
-is named like `WhatsApp Chat with Alice - 2026-11-18.html`, so a folder of exports stays sortable.
+When it finishes you get a summary: filename, message count, file size, any warnings, and whether
+the **whole chat** is in the file. *Whole chat* is only shown when the start of the chat (or of
+your date range) was actually reached; otherwise it says *Partial* or *Completeness unknown*, with
+the reason. The same outcome, with the message and media counts, is written into the TXT, JSON and
+HTML files. The file is named like `WhatsApp Chat with Alice - 2026-11-18.html`, so a folder of exports stays sortable.
 The last five exports are listed in the popup, and an export never interrupts anything you are
 doing in WhatsApp — it restores your scroll position when it is done.
 

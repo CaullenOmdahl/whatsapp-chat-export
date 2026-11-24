@@ -268,4 +268,51 @@ check('unknown formats fall back to html', () => {
   eq(out.extension, 'html');
 });
 
+suite('formats: completeness outcome (issue #8)');
+
+const outcome = (status, extra) =>
+  Object.assign(
+    {
+      status: status,
+      reason: status === 'complete' ? 'Reached the first message of the chat.' : 'WhatsApp stopped returning older messages.',
+      method: 'message-store',
+      loadedMessages: 5,
+      exportedMessages: 3,
+      mediaItems: 4,
+      mediaSaved: 3,
+      mediaMissing: 1,
+    },
+    extra || {}
+  );
+const downloadMeta = (c) => meta({ completeness: c, settings: Object.assign({}, settings, { mediaMode: 'download' }) });
+
+check('TXT states the outcome and the separate counts', () => {
+  const text = formats.serialize('txt', sampleMessages(), downloadMeta(outcome('partial'))).text;
+  ok(/^History: PARTIAL — WhatsApp stopped returning older messages\.$/m.test(text), text.slice(0, 400));
+  ok(/^Messages: 3 exported \(5 loaded from WhatsApp\)$/m.test(text));
+  ok(/^Media: 3 of 4 saved, 1 not saved$/m.test(text));
+  const complete = formats.serialize('txt', sampleMessages(), downloadMeta(outcome('complete'))).text;
+  ok(/^History: Complete — Reached the first message of the chat\.$/m.test(complete));
+});
+
+check('JSON carries the outcome as data', () => {
+  const data = JSON.parse(formats.serialize('json', sampleMessages(), downloadMeta(outcome('unknown'))).text);
+  eq(data.completeness.status, 'unknown');
+  eq(data.completeness.mediaMissing, 1);
+});
+
+check('HTML warns at the top only when the export is not known to be complete', () => {
+  const partial = formats.serialize('html', sampleMessages(), downloadMeta(outcome('partial'))).text;
+  ok(/<div class="outcome">History: PARTIAL — /.test(partial), 'partial: notice at the top');
+  const complete = formats.serialize('html', sampleMessages(), downloadMeta(outcome('complete'))).text;
+  ok(!/<div class="outcome">/.test(complete), 'complete: no notice');
+  ok(/History: Complete — /.test(complete), 'complete: stated in the footer');
+});
+
+check('no outcome recorded: nothing is claimed', () => {
+  const text = formats.serialize('txt', sampleMessages(), meta()).text;
+  ok(!/^History: /m.test(text));
+  eq(JSON.parse(formats.serialize('json', sampleMessages(), meta()).text).completeness, null);
+});
+
 process.exit(summary() ? 0 : 1);

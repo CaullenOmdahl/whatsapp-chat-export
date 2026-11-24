@@ -175,8 +175,13 @@
       bytes: result.bytes,
       format: settings.format,
       mediaMode: settings.mediaMode,
+      completeness: result.completeness ? result.completeness.status : '',
       at: Date.now(),
     };
+  }
+
+  function capturedMediaCount(mediaResult) {
+    return mediaResult && Array.isArray(mediaResult.entries) ? mediaResult.entries.length : 0;
   }
 
   function rememberExport(entry) {
@@ -229,7 +234,14 @@
         m.reactions = [];
       });
     }
-    return { messages: messages, warnings: warnings, chatName: read.chatName, isGroup: read.isGroup };
+    return {
+      messages: messages,
+      warnings: warnings,
+      chatName: read.chatName,
+      isGroup: read.isGroup,
+      boundary: loaded.boundary,
+      loadedCount: read.messages.length,
+    };
   }
 
   async function runExport(rawSettings) {
@@ -259,6 +271,8 @@
     var bounds = dt.rangeForSettings(settings);
     var warnings = [];
     var mediaResult = null;
+    var boundary = null; // was the start of the history (or date range) actually reached?
+    var loadedCount = 0; // messages WhatsApp had loaded, before filtering
 
     try {
       var chatInfo = extractor.getChatInfo();
@@ -285,6 +299,8 @@
         try {
           var storeResult = await exportFromStore(storeInfo, bounds, settings);
           messages = storeResult.messages;
+          boundary = storeResult.boundary;
+          loadedCount = storeResult.loadedCount;
           warnings = warnings.concat(storeResult.warnings);
           if (storeResult.chatName) chatInfo.name = storeResult.chatName;
           usedStore = true;
@@ -341,6 +357,8 @@
         });
 
         warnings = warnings.concat(history.warnings || []);
+        boundary = history.boundary || null;
+        loadedCount = history.loaded || 0;
         if (cancelRequested) throw cancelledError();
 
         // ---- phase 2: parse --------------------------------------------------------
@@ -481,6 +499,28 @@
 
       var stats = formats.summarize(messages);
 
+      // The outcome, as separate facts: was the start of the history reached, how many
+      // messages WhatsApp had and how many were exported, and what happened to media. A
+      // written file alone is not proof of a complete export.
+      var mediaItems = messages.filter(function (m) {
+        return Boolean(m.media);
+      });
+      var completeness = {
+        status: (boundary && boundary.status) || 'unknown',
+        reason: (boundary && boundary.reason) || 'Could not tell whether the whole chat was loaded.',
+        method: usedStore ? 'message-store' : 'screen',
+        loadedMessages: loadedCount,
+        exportedMessages: messages.length,
+        mediaItems: mediaItems.length,
+        mediaSaved: capturedMediaCount(mediaResult),
+        mediaMissing:
+          settings.mediaMode === 'download'
+            ? mediaItems.filter(function (m) {
+                return m.media.missing;
+              }).length
+            : 0,
+      };
+
       var meta = {
         chat: { name: chatInfo.name, isGroup: isGroup },
         exportedAt: Date.now(),
@@ -490,6 +530,7 @@
 
       // The file carries its own notes (date range, warnings) so it explains itself.
       meta.warnings = warnings.slice();
+      meta.completeness = completeness;
       var serialized = formats.serialize(settings.format, messages, meta);
       var baseName = formats.buildBaseName(chatInfo.name, meta.exportedAt);
       var reportFileName = baseName + '.' + serialized.extension;
@@ -529,15 +570,17 @@
         chatName: chatInfo.name,
         isGroup: isGroup,
         dateRange: stats.range,
+        completeness: completeness,
       };
 
       lastState.phase = PHASE.DONE;
+      lastState.completeness = completeness;
       lastState.finishedAt = Date.now();
       lastState.filename = fileName;
       lastState.bytes = blob.size;
       lastState.messageCount = stats.total;
       lastState.warnings = warnings;
-      lastState.detail = 'Export complete';
+      lastState.detail = 'Export saved';
       lastState.percent = 100;
       sendProgress(lastState);
       mirrorState(lastState);

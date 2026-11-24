@@ -40,6 +40,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The media counter no longer reads "Saving media 943 of 71".
 - TXT, JSON and HTML exports record the date range used and every warning, so a short or
   incomplete export explains itself without the popup.
+- **Every export states whether it is complete** ([#8]): *Complete* only when the start of the
+  chat (or of the date range) was actually reached, otherwise *Partial* or *Completeness
+  unknown* with the reason, next to separate counts of messages loaded, messages exported and
+  media saved or not saved. Shown in the popup (whose title is now "Export saved") and in the
+  TXT, JSON and HTML files; HTML shows a notice at the top when the export is not complete.
+- **History loading is patient** ([#8]): a loader round that brings nothing (older history still
+  on its way from WhatsApp's servers) is retried with growing waits before falling back to
+  scrolling, and a working loader is no longer abandoned after one empty round. A fresh-tab
+  export stopped at 201 of 941 messages before this.
 - Media downloads are all started at once and read six at a time, and each has a time limit
   (30 s, restarted while it makes progress). A download waiting on the phone could stall an
   export for many minutes, and those waits used to queue three at a time.
@@ -119,6 +128,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `data-id` reason above.
 
 [#5]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/5
+[#8]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/8
 [#6]: https://github.com/CaullenOmdahl/whatsapp-chat-export/issues/6
 
 ## [1.0.2] — 2026-11-18
